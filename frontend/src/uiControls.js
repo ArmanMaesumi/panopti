@@ -26,7 +26,7 @@ export function handleSliderChange(controls, socketRef, debouncedRef, controlId,
     if (!debouncedRef.current[controlId]) {
         debouncedRef.current[controlId] = throttle((currentValue) => {
             const eventData = {
-                eventType: 'sliderChange', 
+                eventType: 'sliderChange',
                 controlId: controlId,
                 value: parseFloat(currentValue)
             };
@@ -101,6 +101,18 @@ export function handleDropdownChange(socketRef, controlId, value) {
 
 export function handleColorChange(socketRef, controlId, color) {
     const eventData = { eventType: 'colorChange', controlId, value: color };
+    if (window.viewerId) {
+        eventData.viewer_id = window.viewerId;
+    }
+    socketRef.current.emit('ui_event', eventData);
+}
+
+export function handleImageClick(socketRef, controlId, index) {
+    const eventData = {
+        eventType: 'imageGalleryEvent',
+        controlId,
+        value: { type: 'imageClick', index }
+    };
     if (window.viewerId) {
         eventData.viewer_id = window.viewerId;
     }
@@ -182,9 +194,183 @@ export function ColorPickerControl({ control, handlers }) {
     );
 }
 
-export function renderControl(control, handlers) {
+export function ImageGalleryControl({ control, handlers }) {
+    const [selectedIndex, setSelectedIndex] = React.useState(null);
+    const [currentPage, setCurrentPage] = React.useState(0);
+
+    const handleImageClick = (index) => {
+        setSelectedIndex(index);
+        handlers.handleImageClick(control.id, index);
+    };
+
+    const images = control.images || [];
+    const thumbnailSize = control.thumbnail_size || 150;
+    const columns = control.columns || 3;
+    const rowsPerPage = control.rows_per_page;
+
+    // Calculate pagination
+    const itemsPerPage = rowsPerPage ? rowsPerPage * columns : null;
+    const totalPages = itemsPerPage ? Math.ceil(images.length / itemsPerPage) : 1;
+    const isPaginated = rowsPerPage !== null && rowsPerPage !== undefined;
+
+    // Get images for current page
+    const startIndex = isPaginated ? currentPage * itemsPerPage : 0;
+    const endIndex = isPaginated ? Math.min(startIndex + itemsPerPage, images.length) : images.length;
+    const visibleImages = images.slice(startIndex, endIndex);
+
+    const handlePageChange = (newPage) => {
+        if (newPage >= 0 && newPage < totalPages) {
+            setCurrentPage(newPage);
+            // Emit page change event to backend
+            const eventData = {
+                eventType: 'imageGalleryEvent',
+                controlId: control.id,
+                value: { type: 'pageChange', page: newPage }
+            };
+            if (window.viewerId) {
+                eventData.viewer_id = window.viewerId;
+            }
+            handlers.socketRef.current.emit('ui_event', eventData);
+        }
+    };
+
+    return React.createElement(
+        'div',
+        { className: 'control-group image-gallery-group', key: control.id },
+        React.createElement('label', { className: 'control-label' }, control.name),
+
+        // Pagination controls (top)
+        isPaginated && React.createElement(
+            'div',
+            {
+                className: 'image-gallery-pagination',
+                style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '8px',
+                    marginBottom: '8px',
+                    padding: '4px 8px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    borderRadius: '4px'
+                }
+            },
+            React.createElement('button', {
+                onClick: () => handlePageChange(currentPage - 1),
+                disabled: currentPage === 0,
+                style: {
+                    padding: '4px 12px',
+                    cursor: currentPage === 0 ? 'not-allowed' : 'pointer',
+                    opacity: currentPage === 0 ? 0.5 : 1,
+                    backgroundColor: '#444',
+                    color: '#fff',
+                    border: '1px solid #666',
+                    borderRadius: '3px'
+                }
+            }, '◀ Previous'),
+            React.createElement('span', {
+                style: {
+                    fontSize: '13px',
+                    color: '#ccc'
+                }
+            }, `Page ${currentPage + 1} of ${totalPages} (${startIndex + 1}-${endIndex} of ${images.length})`),
+            React.createElement('button', {
+                onClick: () => handlePageChange(currentPage + 1),
+                disabled: currentPage >= totalPages - 1,
+                style: {
+                    padding: '4px 12px',
+                    cursor: currentPage >= totalPages - 1 ? 'not-allowed' : 'pointer',
+                    opacity: currentPage >= totalPages - 1 ? 0.5 : 1,
+                    backgroundColor: '#444',
+                    color: '#fff',
+                    border: '1px solid #666',
+                    borderRadius: '3px'
+                }
+            }, 'Next ▶')
+        ),
+
+        // Image grid
+        React.createElement(
+            'div',
+            {
+                className: 'image-gallery-container',
+                style: {
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${columns}, 1fr)`,
+                    gap: '8px',
+                    marginTop: '8px'
+                }
+            },
+            visibleImages.map((imgSrc, pageIndex) => {
+                const globalIndex = startIndex + pageIndex;
+                return React.createElement('img', {
+                    key: `${control.id}-img-${globalIndex}`,
+                    src: imgSrc,
+                    alt: `Image ${globalIndex + 1}`,
+                    className: `gallery-thumbnail ${selectedIndex === globalIndex ? 'selected' : ''}`,
+                    style: {
+                        width: '100%',
+                        height: `${thumbnailSize}px`,
+                        objectFit: 'cover',
+                        cursor: 'pointer',
+                        borderRadius: '4px',
+                        border: selectedIndex === globalIndex ? '2px solid #4CAF50' : '2px solid transparent',
+                        transition: 'border 0.2s'
+                    },
+                    onClick: () => handleImageClick(globalIndex),
+                    onMouseEnter: (e) => {
+                        if (selectedIndex !== globalIndex) {
+                            e.target.style.border = '2px solid #888';
+                        }
+                    },
+                    onMouseLeave: (e) => {
+                        if (selectedIndex !== globalIndex) {
+                            e.target.style.border = '2px solid transparent';
+                        }
+                    }
+                });
+            })
+        )
+    );
+}
+
+export function GroupControl({ control, handlers, allControls }) {
+    const [collapsed, setCollapsed] = React.useState(control.collapsed || false);
+
+    // Get controls that belong to this group
+    const groupControls = allControls.filter(c => c.group === control.id);
+
+    const toggleCollapsed = () => {
+        setCollapsed(!collapsed);
+    };
+
+    return React.createElement(
+        'div',
+        { className: 'control-group-container', key: control.id },
+        React.createElement(
+            'div',
+            {
+                className: 'control-group-header',
+                onClick: toggleCollapsed
+            },
+            React.createElement('i', {
+                className: `fas fa-chevron-${collapsed ? 'right' : 'down'} group-chevron`
+            }),
+            React.createElement('span', { className: 'group-label' }, control.name)
+        ),
+        !collapsed && React.createElement(
+            'div',
+            { className: 'control-group-content' },
+            groupControls.map(c => renderControl(c, handlers, allControls))
+        )
+    );
+}
+
+export function renderControl(control, handlers, allControls = []) {
     const h = handlers;
     switch (control.type) {
+        case 'group':
+            return React.createElement(GroupControl, { key: control.id, control, handlers: h, allControls });
         case 'slider':
             return React.createElement(
                 'div',
@@ -291,6 +477,8 @@ export function renderControl(control, handlers) {
             );
         case 'color_picker':
             return React.createElement(ColorPickerControl, { key: control.id, control, handlers: h });
+        case 'image_gallery':
+            return React.createElement(ImageGalleryControl, { key: control.id, control, handlers: h });
         case 'plotly':
             return React.createElement(
                 'div',

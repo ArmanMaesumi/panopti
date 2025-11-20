@@ -76,4 +76,17 @@ def callback_camera(viewer, camera):
 def callback_inspect(viewer, inspect):
     print(inspect)
 
+# New: on-hover event (throttled)
+@viewer.events.hover(throttle=100)
+def callback_hover(viewer, info):
+    # Print hovered object name and pixel coordinates
+    try:
+        print(f"hover: {info.object_name} at {tuple(info.screen_coords)}")
+    except Exception:
+        # In case dataclass conversion isn't available, fall back to dict
+        if isinstance(info, dict):
+            print(f"hover: {info.get('object_name')} at {tuple(info.get('screen_coords', []))}")
+        else:
+            print('hover event received')
+
 viewer.hold() # prevent the script from terminating

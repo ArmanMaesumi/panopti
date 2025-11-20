@@ -5,7 +5,7 @@ window.Buffer = Buffer;
 import React, { lazy } from 'react';
 import ReactDOM from 'react-dom';
 import { marked } from 'marked';
-import { initComms } from './comms.js'; 
+import { initComms } from './comms.js';
 import Plotly from 'plotly.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
@@ -23,6 +23,7 @@ import {
     handleCheckboxChange as uiHandleCheckboxChange,
     handleDropdownChange as uiHandleDropdownChange,
     handleColorChange as uiHandleColorChange,
+    handleImageClick as uiHandleImageClick,
     renderControl as renderUIControl
 } from './uiControls.js';
 import {
@@ -60,7 +61,7 @@ function applyThemeVars(theme) {
 }
 
 const App = () => {
-    
+
     // Global config:
     const [config, setConfig] = React.useState(window.panoptiConfig);
     const [maxFps, setMaxFps] = React.useState(60);
@@ -84,6 +85,7 @@ const App = () => {
         showGrid: true,
         showAxes: true,
         inspectMode: false,
+        boxInspectMode: false,
         powerPreference: 'default'
     });
     const [gizmoEnabled, setGizmoEnabled] = React.useState(false);
@@ -118,7 +120,7 @@ const App = () => {
     const [lastHeartbeat, setLastHeartbeat] = React.useState(Date.now() - 10000);
     const [ping, setPing] = React.useState(null);
     const heartbeatSentAtRef = React.useRef(null);
-    
+
     const [isLayersPanelCollapsed, setIsLayersPanelCollapsed] = React.useState(false);
     const [showInfoBar, setShowInfoBar] = React.useState(true);
 
@@ -130,7 +132,7 @@ const App = () => {
         //     icon: 'fas fa-chart-bar',
         //     isOpen: false,
         //     pos: { x: 100, y: 100 },
-        //     content: React.createElement('div', null, 
+        //     content: React.createElement('div', null,
         //         // React.createElement('h3', null, 'Scene Statistics'),
         //         React.createElement('p', null, 'Total Objects: ', sceneObjects.length),
         //         React.createElement('p', null, 'Selected Object: ', selectedObject ? selectedObject.data.id : 'None'),
@@ -138,7 +140,7 @@ const App = () => {
         //     )
         // },
         // {
-        //     id: 'widget2', 
+        //     id: 'widget2',
         //     title: 'Settings',
         //     icon: 'fas fa-cog',
         //     isOpen: false,
@@ -164,7 +166,7 @@ const App = () => {
     React.useEffect(() => {
         const injectedConfig = window.panoptiConfig;
         const cfg = injectedConfig || getFallbackDefaults();
-        
+
         setConfig(cfg);
 
         setConstantsFromConfig(cfg);
@@ -180,11 +182,11 @@ const App = () => {
             setBackgroundColor(cfg.viewer.theme['background-color']);
         }
         applyThemeVars(cfg.viewer.theme);
-        
+
         // Set initial UI state
         setIsPanelCollapsed(cfg.viewer.ui.panel.controls.collapsed);
         setIsLayersPanelCollapsed(cfg.viewer.ui.panel.layers.collapsed);
-        
+
         // Set render settings (tools)
         setRenderSettings(prev => ({
             ...prev,
@@ -192,11 +194,11 @@ const App = () => {
             showAxes: cfg.viewer.tools.axes.enabled,
             powerPreference: cfg.viewer.renderer['power-preference']
         }));
-        
+
         // Set console and infobar visibility
         setShowConsole(cfg.viewer.ui.console.enabled);
         setShowInfoBar(cfg.viewer.ui.infobar.enabled);
-        
+
         // Update camera if SceneManager is ready
         if (sceneManagerRef.current) {
             sceneManagerRef.current.setCamera({
@@ -220,11 +222,11 @@ const App = () => {
             transformStateRef.current = newState;
         }
     }, [selectedObject]);
-    
+
     React.useEffect(() => {
-        const socket = initComms(sceneManagerRef, { 
-            setIsLoading, 
-            setControls, 
+        const socket = initComms(sceneManagerRef, {
+            setIsLoading,
+            setControls,
             setConsoleLines,
             setConnectionStatus,
             setPing
@@ -233,7 +235,7 @@ const App = () => {
 
         const container = sceneRef.current;
         const { clientWidth, clientHeight } = container;
-        
+
         // Create SceneManager with config from injected data
         const injectedConfig = window.panoptiConfig || getFallbackDefaults();
         const SceneManager = createSceneManager(
@@ -248,7 +250,7 @@ const App = () => {
         );
         sceneManagerRef.current = SceneManager;
         rendererRef.current = SceneManager.renderer;
-        
+
         // Observe container resize using ResizeObserver
         const resizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
@@ -258,7 +260,7 @@ const App = () => {
         });
 
         resizeObserver.observe(container);
-        
+
         // FPS-throttled render loop:
         fpsCapRef.current = createFpsCap( sceneManagerRef.current.update, maxFps );
 
@@ -267,11 +269,11 @@ const App = () => {
             requestAnimationFrame( onAnimationFrame );
         }
         requestAnimationFrame( onAnimationFrame );
-        
+
         return () => {
             // Clear the debounced functions reference
             debouncedSliderEmitRef.current = {};
-            
+
             resizeObserver.disconnect();
             socket.disconnect();
             if (sceneManagerRef.current) {
@@ -322,22 +324,22 @@ const App = () => {
         if (sceneManagerRef.current) {
             sceneManagerRef.current.onWindowResize();
         }
-        
+
         const resizeTimeout = setTimeout(() => {
             if (sceneManagerRef.current) {
                 sceneManagerRef.current.onWindowResize();
             }
         }, 310);
-        
+
         return () => clearTimeout(resizeTimeout);
     }, [isPanelCollapsed]);
-    
+
     React.useEffect(() => {
         if (sceneManagerRef.current) {
             sceneManagerRef.current.applyRenderSettings(renderSettings);
         }
     }, [renderSettings]);
-    
+
     React.useEffect(() => {
         if (sceneManagerRef.current) {
             updateSceneObjectsList();
@@ -369,13 +371,13 @@ const App = () => {
             });
         }, 0);
     }, [controls]);
-    
+
     const updateSceneObjectsList = () => {
         if (sceneManagerRef.current) {
             setSceneObjects(sceneManagerRef.current.getAllObjects());
         }
     };
-    
+
     const debouncedSliderEmitRef = React.useRef({});
 
     const handleSliderChange = (id, value) =>
@@ -391,7 +393,9 @@ const App = () => {
         uiHandleDropdownChange(socketRef, id, value);
     const handleColorChange = (id, value) =>
         uiHandleColorChange(socketRef, id, value);
-    
+    const handleImageClick = (id, index) =>
+        uiHandleImageClick(socketRef, id, index);
+
     const handlePanelCollapseToggle = () => {
         if (!isPanelCollapsed) {
             setPanelTransitionClass('panel-collapsing');
@@ -404,7 +408,7 @@ const App = () => {
             setTimeout(() => setPanelTransitionClass(''), 300);
         }
     };
-    
+
     const changeBackgroundColor = (color) =>
         bgColor(sceneManagerRef, setBackgroundColor, color);
 
@@ -415,7 +419,7 @@ const App = () => {
     };
 
     const resetCamera = () => resetCam(sceneManagerRef);
-    
+
     const refreshState = () => {
         // Clear existing objects and controls
         if (sceneManagerRef.current) {
@@ -507,35 +511,35 @@ const App = () => {
     const toggleConsole = () => setShowConsole(prev => !prev);
 
     const toggleWidget = (widgetId) => {
-        setWidgets(prev => prev.map(widget => 
-            widget.id === widgetId 
+        setWidgets(prev => prev.map(widget =>
+            widget.id === widgetId
                 ? { ...widget, isOpen: !widget.isOpen }
                 : widget
         ));
     };
 
     const minimizeWidget = (widgetId) => {
-        setWidgets(prev => prev.map(widget => 
-            widget.id === widgetId 
+        setWidgets(prev => prev.map(widget =>
+            widget.id === widgetId
                 ? { ...widget, isOpen: false }
                 : widget
         ));
     };
 
     const updateWidgetPosition = (widgetId, newPos) => {
-        setWidgets(prev => prev.map(widget => 
-            widget.id === widgetId 
+        setWidgets(prev => prev.map(widget =>
+            widget.id === widgetId
                 ? { ...widget, pos: newPos }
                 : widget
         ));
     };
-    
+
     const toggleRenderSetting = (setting, value) =>
         toggleSetting(sceneManagerRef, setRenderSettings, setting, value);
 
     const updateLightSetting = (setting, value) =>
         updateLight(sceneManagerRef, setLightSettings, setting, value);
-    
+
     const toggleGizmo = () => {
         const newEnabled = !gizmoEnabled;
         setGizmoEnabled(newEnabled);
@@ -543,7 +547,7 @@ const App = () => {
             sceneManagerRef.current.setGizmoEnabled(newEnabled);
         }
     };
-    
+
     const exportObject = exportObj;
 
     // Toggle object visibility with 3 states: visible, semi-transparent, hidden
@@ -553,7 +557,7 @@ const App = () => {
     // Toggle animated mesh playback
     const toggleAnimatedMeshPlayback = (objectId) =>
         togglePlayback(sceneManagerRef, objectId, updateSceneObjectsList);
-    
+
     const renderControl = (control) =>
         renderUIControl(control, {
             handleSliderChange,
@@ -562,9 +566,11 @@ const App = () => {
             handleButtonClick,
             handleCheckboxChange,
             handleDropdownChange,
-            handleColorChange
-        });
-    
+            handleColorChange,
+            handleImageClick,
+            socketRef
+        }, controls);
+
     // Render capture functions
     const captureCurrentView = () =>
         captureView(rendererRef, sceneManagerRef, setCapturedImage, setShowRenderModal);
@@ -577,7 +583,7 @@ const App = () => {
 
     const discardImage = () =>
         discardImg(setShowRenderModal, setCapturedImage);
-    
+
     // Create Scene Toolbar
     const renderSceneToolbar = () =>
         sceneToolbar({
@@ -588,11 +594,11 @@ const App = () => {
             toggleConsole,
             isDark: backgroundColor === config.viewer.theme['background-color-dark'],
         });
-    
+
     // Create Render Toolbar
     const renderRenderToolbar = () =>
         renderToolbar(renderSettings, toggleRenderSetting, captureCurrentView, renderToClipboard, gizmoEnabled, toggleGizmo);
-    
+
     // Create Lighting Toolbar
     const renderLightingToolbar = () =>
         lightingToolbar(lightSettings, updateLightSetting);
@@ -704,11 +710,11 @@ const App = () => {
             )
         );
     };
-    
+
     // Loading Overlay
     const renderLoadingOverlay = () => {
         if (!isLoading) return null;
-        
+
         return React.createElement(
             'div',
             { className: 'loading-overlay' },
@@ -743,7 +749,7 @@ const App = () => {
                 consoleRef,
             }),
             // Render widget panels
-            widgets.map(widget => 
+            widgets.map(widget =>
                 React.createElement(WidgetPanel, {
                     key: widget.id,
                     showWidget: widget.isOpen,
@@ -759,7 +765,7 @@ const App = () => {
         ),
         React.createElement(
             'div',
-            { 
+            {
                 className: `ui-panel${isPanelCollapsed ? ' panel-collapsed' : ''}${panelTransitionClass ? ' ' + panelTransitionClass : ''}`
             },
             React.createElement(
@@ -784,8 +790,8 @@ const App = () => {
             React.createElement(
                 'div',
                 { className: 'ui-panel-content' },
-                controls.length > 0 
-                    ? controls.map(renderControl)
+                controls.length > 0
+                    ? controls.filter(c => !c.group).map(renderControl)
                     : React.createElement('p', null, "No controls available.")
             )
         ),
@@ -803,7 +809,7 @@ const App = () => {
             { className: 'modal-overlay', onClick: discardImage },
             React.createElement(
                 'div',
-                { 
+                {
                     className: 'modal-content',
                     onClick: (e) => e.stopPropagation()
                 },
@@ -818,7 +824,7 @@ const App = () => {
                     { className: 'modal-buttons' },
                     React.createElement(
                         'button',
-                        { 
+                        {
                             className: 'modal-btn save-btn',
                             onClick: saveImage
                         },
@@ -826,7 +832,7 @@ const App = () => {
                     ),
                     React.createElement(
                         'button',
-                        { 
+                        {
                             className: 'modal-btn discard-btn',
                             onClick: discardImage
                         },

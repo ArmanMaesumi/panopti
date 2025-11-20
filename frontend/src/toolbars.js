@@ -191,7 +191,7 @@ export function renderRenderToolbar(renderSettings, toggleRenderSetting, capture
             'button',
             {
                 className: `toolbar-button tooltip ${renderSettings.showAxes ? 'active' : ''}`,
-                'data-tooltip': renderSettings.showAxes ? 'Disable Axes' : 'Enable Axes', 
+                'data-tooltip': renderSettings.showAxes ? 'Disable Axes' : 'Enable Axes',
                 onClick: () => toggleRenderSetting('showAxes')
             },
             React.createElement('i', { className: 'mdi mdi-axis-arrow', style: { fontSize: '20px' } })
@@ -204,6 +204,15 @@ export function renderRenderToolbar(renderSettings, toggleRenderSetting, capture
                 onClick: () => toggleRenderSetting('inspectMode')
             },
             React.createElement('i', { className: 'fas fa-search' })
+        ),
+        React.createElement(
+            'button',
+            {
+                className: `toolbar-button tooltip ${renderSettings.boxInspectMode ? 'active' : ''}`,
+                'data-tooltip': 'Box Inspect (drag to select vertices)',
+                onClick: () => toggleRenderSetting('boxInspectMode')
+            },
+            React.createElement('i', { className: 'fas fa-vector-square' })
         ),
         // Gizmo toggle button
         toggleGizmo && React.createElement(

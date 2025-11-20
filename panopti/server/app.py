@@ -1,41 +1,47 @@
 # panopti/server/app.py
 import os
 import uuid
+import json
+from importlib.resources import files as pkg_files
 from flask import Flask, render_template, send_from_directory, request, Response, jsonify
 from panopti.utils.parse import decode_msgpack, encode_msgpack, as_list
 from flask_socketio import SocketIO, join_room
-import pkg_resources
-import json
 
 import panopti.objects as PanoptiObjects
 from panopti.objects.utils import export_object_from_dict
 from .handlers import register_handlers, _update_viewer_state
 from panopti.config import load_config
 
-template_path = pkg_resources.resource_filename(
-    "panopti", "server/static/templates"
-)
-manifest_path = pkg_resources.resource_filename(
-    "panopti", "server/static/dist/.vite/manifest.json"
-)
-with open(manifest_path, "r", encoding="utf-8") as f:
-    manifest = json.load(f)
+# Resolve template directory via importlib.resources (avoids deprecated pkg_resources)
+_TEMPLATES_DIR = str((pkg_files('panopti') / 'server' / 'static' / 'templates'))
 
 def create_app(config_path: str = None, debug: bool = False):
-    app = Flask(__name__, template_folder=template_path)
+    app = Flask(__name__, template_folder=_TEMPLATES_DIR)
     app.config['SECRET_KEY'] = 'secret!'
     app.config['DEBUG'] = debug
     app.config['VITE_DEV_SERVER'] = os.environ.get('VITE_DEV_SERVER')
-    
-    socketio = SocketIO(app, 
-                        cors_allowed_origins="*", 
-                        async_mode='eventlet', 
+
+    # Load Vite manifest if available (when not using dev server)
+    manifest = {}
+    if not app.config['VITE_DEV_SERVER']:
+        manifest_path = str((pkg_files('panopti') / 'server' / 'static' / 'dist' / '.vite' / 'manifest.json'))
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+        except FileNotFoundError:
+            # Manifest not found; likely running without a built frontend. We'll fall back to dev mode templates.
+            manifest = {}
+    app.config['VITE_MANIFEST'] = manifest
+
+    socketio = SocketIO(app,
+                        cors_allowed_origins="*",
+                        async_mode='eventlet',
                         ping_timeout=60, ping_interval=1, max_http_buffer_size=1e8)
-    
+
     app.config['SOCKETIO'] = socketio
     app.config['CLIENT_VIEWERS'] = {}  # Store registered clients
     app.config['HTTP_EVENTS'] = {}
-    
+
     # Load configuration at startup
     app.config['PANOPTI_CONFIG'] = load_config(config_path)
 
@@ -50,13 +56,19 @@ def create_app(config_path: str = None, debug: bool = False):
     def index():
         # Check if viewer_id was specified in query params
         viewer_id = request.args.get('viewer_id')
-        is_dev = app.config['DEBUG'] and app.config['VITE_DEV_SERVER']
-        return render_template('index.html', viewer_id=viewer_id, bundle=manifest, config=app.config['PANOPTI_CONFIG'], is_dev=is_dev)
-    
+        is_dev = bool(app.config['VITE_DEV_SERVER'])
+        return render_template(
+            'index.html',
+            viewer_id=viewer_id,
+            bundle=app.config.get('VITE_MANIFEST', {}),
+            config=app.config['PANOPTI_CONFIG'],
+            is_dev=is_dev
+        )
+
     @app.route('/static/<path:path>')
     def serve_static(path):
         return send_from_directory('static', path)
-    
+
     @app.route('/export/<viewer_id>/<object_id>', methods=['GET'])
     def export_object(viewer_id, object_id):
         """Export a geometry object registered by a viewer."""
@@ -118,7 +130,7 @@ def create_app(config_path: str = None, debug: bool = False):
             return "not found", 404
         packed = encode_msgpack(data)
         return Response(packed, mimetype='application/msgpack')
-    
+
     @socketio.on('connect')
     def handle_connect():
         print("Client connected")
@@ -130,15 +142,15 @@ def create_app(config_path: str = None, debug: bool = False):
                 {'id': viewer_id, 'objects': {}, 'controls': {}}
             )
             print(f"Joined room {viewer_id}")
-    
+
     @socketio.on('request_state')
     def handle_request_state(data=None):
         _handle_missing_viewer_id(data)
-        
+
         viewer_id = data.get('viewer_id')
         print(f"Request for viewer ID: {viewer_id}")
         socketio.emit('request_state_from_client', room=viewer_id)
-    
+
     @socketio.on('disconnect')
     def handle_disconnect():
         print("Client disconnected")
@@ -151,7 +163,7 @@ def create_app(config_path: str = None, debug: bool = False):
         event_type = data.get('eventType')
         control_id = data.get('controlId')
         value = data.get('value')
-        
+
         socketio.emit(
             'ui_event_response',
             {
@@ -162,7 +174,7 @@ def create_app(config_path: str = None, debug: bool = False):
             },
             room=viewer_id
         )
-    
+
     # Register standard event handlers:
     register_handlers(app)
 
@@ -198,7 +210,7 @@ def create_app(config_path: str = None, debug: bool = False):
         _handle_missing_viewer_id(data)
         viewer_id = data.get('viewer_id')
         socketio.emit('restart_script', {'viewer_id': viewer_id}, room=viewer_id)
-    
+
     @socketio.on('register_viewer')
     def handle_register_viewer(data):
         _handle_missing_viewer_id(data)
@@ -211,7 +223,7 @@ def create_app(config_path: str = None, debug: bool = False):
         if viewer_id:
             join_room(viewer_id)
         return {'status': 'success', 'viewer_id': viewer_id}
-    
+
     app.config['SOCKETIO'] = socketio
 
     return app

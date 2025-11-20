@@ -11,7 +11,7 @@ _OBJECT_ADDS = {"add_mesh", "add_animated_mesh", "add_points", "add_arrows"}
 _CONTROL_ADDS = {"add_control"}
 _OBJECT_DELETES = {"delete_object"}
 _CONTROL_DELETES = {"delete_control"}
-_EVENTS = {"events.camera", "events.inspect", "events.select_object", "events.gizmo"}
+_EVENTS = {"events.camera", "events.inspect", "events.hover", "events.select_object", "events.gizmo"}
 
 def _update_viewer_state(event_type: str, data: Dict[str, Any]) -> None:
     """Update stored viewer state depending on the event type."""

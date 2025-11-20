@@ -15,6 +15,7 @@ Panopti offers several features:
 - ✅ Geometric primitives: meshes, point clouds, animated geometry, etc.
 - ✅ Interactive UI elements with Python callbacks
 - ✅ Programmable events: on-click, inspection tool, transformation gizmo, camera update, etc.
+- ✅ Programmable events: on-click, hover, inspection tool, transformation gizmo, camera update, etc.
 - ✅ Convenience features: exporting geometry, mirroring console output, embedding Plotly figures
 - ✅ Material customization
 
@@ -38,7 +39,7 @@ import trimesh # just for io
 import numpy as np
 
 # create panopti client that connects to server:
-viewer = panopti.connect(server_url="http://localhost:8080", viewer_id='client') 
+viewer = panopti.connect(server_url="http://localhost:8080", viewer_id='client')
 # open viewer in browser: http://localhost:8080/?viewer_id=client
 
 mesh = trimesh.load('./examples/demosthenes.obj')
@@ -64,6 +65,16 @@ viewer.hold() # prevent script from terminating
 ```
 For more examples see [Documentation](https://armanmaesumi.github.io/panopti/examples/importing_geometry/) or `/examples`
 
+### Hover callbacks
+You can listen for hover events similar to inspect:
+
+```python
+@viewer.events.hover(throttle=100)
+def on_hover(viewer, info):
+  # info is an InspectInfo dataclass (same as inspect event)
+  print('Hovering over', info.object_name, 'at', tuple(info.screen_coords))
+```
+
 ## Installation
 
 To install from pip:
@@ -76,7 +87,7 @@ To install from source:
 git clone https://github.com/ArmanMaesumi/panopti
 
 # build frontend viewer
-cd panopti/frontend 
+cd panopti/frontend
 npm install
 npm run build
 cd ..
@@ -103,7 +114,7 @@ Doc-related dependencies:
 pip install mkdocs mkdocs-material mkdocstrings mkdocstrings-python
 ```
 
---- 
+---
 
 ### Development
 

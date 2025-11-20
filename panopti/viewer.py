@@ -19,7 +19,7 @@ from .objects.animated_mesh import AnimatedMesh
 from .objects.points import Points
 from .objects.arrows import Arrows
 
-from .ui.controls import Slider, Button, Label, Checkbox, Dropdown, DownloadButton, PlotlyPlot, ColorPicker
+from .ui.controls import Slider, Button, Label, Checkbox, Dropdown, DownloadButton, PlotlyPlot, ColorPicker, Group, ImageGallery
 from .utils.parse import as_array, as_list
 
 # Default camera parameters used when a new frontend client connects.
@@ -54,13 +54,13 @@ class BaseViewer:
         def _callback(segments):
             self.socket_manager.emit_console_output(segments)
         return _callback
-    
+
     def print_colored(self, text: str, color: str = None, end: str = '\n'):
         """Print colored text directly to the viewer console.
-        
+
         Parameters:
             text (str): The text to print
-            color (str): Optional color name: white, red, green, yellow, blue, magenta, 
+            color (str): Optional color name: white, red, green, yellow, blue, magenta,
                    bright-red, bright-green, bright-yellow, bright-blue, bright-magenta
             end (str): The end character to print (default is `\\n`)
         """
@@ -88,15 +88,26 @@ class BaseViewer:
 
         os.execv(sys.executable, args)
 
-    def _add_control(self, cls, **kwargs):
+    def _add_control(self, cls, group=None, **kwargs):
         """Create a UI control and register it with the server."""
         control = cls(viewer=self, **kwargs)
         self.ui_controls[control.name] = control
+
+        # If a group is specified, add this control to it
+        if group is not None:
+            if isinstance(group, Group):
+                group.add_control(control)
+            elif isinstance(group, str):
+                # Look up group by name
+                grp = self.ui_controls.get(group)
+                if grp and isinstance(grp, Group):
+                    grp.add_control(control)
+
         self.socket_manager.emit_add_control(control)
         return control
-    
+
     def add_mesh(self,
-                vertices: np.ndarray, 
+                vertices: np.ndarray,
                 faces: np.ndarray,
                 name: str,
                 visible: bool = True,
@@ -125,7 +136,7 @@ class BaseViewer:
         """
         if name is None:
             name = f"mesh_{uuid.uuid4().hex[:8]}"
-        
+
         mesh = Mesh(
             viewer=self,
             vertices=vertices,
@@ -139,15 +150,15 @@ class BaseViewer:
             face_colors=face_colors,
             material=material
         )
-        
+
         self.objects[name] = mesh
         self.socket_manager.emit_add_geometry(mesh)
-        
+
         return mesh
-    
-    def add_animated_mesh(self, 
-                         vertices: np.ndarray, 
-                         faces: np.ndarray, 
+
+    def add_animated_mesh(self,
+                         vertices: np.ndarray,
+                         faces: np.ndarray,
                          name: str, framerate: float = 24.0,
                          visible: bool = True,
                          position: Union[Tuple[float, float, float], np.ndarray] = (0, 0, 0),
@@ -179,7 +190,7 @@ class BaseViewer:
 
         if name is None:
             name = f"animated_mesh_{uuid.uuid4().hex[:8]}"
-        
+
         animated_mesh = AnimatedMesh(
             viewer=self,
             vertices=vertices,
@@ -195,18 +206,18 @@ class BaseViewer:
             face_colors=face_colors,
             material=material
         )
-        
+
         self.objects[name] = animated_mesh
         self.socket_manager.emit_add_geometry(animated_mesh)
-        
+
         return animated_mesh
-    
-    def add_points(self, 
-                   points: np.ndarray, 
+
+    def add_points(self,
+                   points: np.ndarray,
                    name: str,
                    colors: Union[Tuple[float, float, float], np.ndarray] = (0.5, 0.5, 0.5),
-                   size: float = 0.01, 
-                   visible: bool = True, 
+                   size: float = 0.01,
+                   visible: bool = True,
                    opacity: float = 1.0) -> Points:
         """Adds a Point Cloud object to the viewer.
 
@@ -223,7 +234,7 @@ class BaseViewer:
         """
         if name is None:
             name = f"points_{uuid.uuid4().hex[:8]}"
-        
+
         points_obj = Points(
             viewer=self,
             points=points,
@@ -233,19 +244,19 @@ class BaseViewer:
             visible=visible,
             opacity=opacity
         )
-        
+
         self.objects[name] = points_obj
         self.socket_manager.emit_add_geometry(points_obj)
-        
+
         return points_obj
-    
-    def add_arrows(self, 
+
+    def add_arrows(self,
                    starts: np.ndarray,
-                   ends: np.ndarray, 
+                   ends: np.ndarray,
                    name: str,
                    color: Union[Tuple[float, float, float], np.ndarray] = (0, 0, 0),
-                   width: float = 0.01, 
-                   visible: bool = True, 
+                   width: float = 0.01,
+                   visible: bool = True,
                    opacity: float = 1.0) -> Arrows:
         """Adds an Arrows object to the viewer.
 
@@ -263,7 +274,7 @@ class BaseViewer:
         """
         if name is None:
             name = f"arrows_{uuid.uuid4().hex[:8]}"
-        
+
         arrows_obj = Arrows(
             viewer=self,
             starts=starts,
@@ -274,15 +285,15 @@ class BaseViewer:
             visible=visible,
             opacity=opacity
         )
-        
+
         self.objects[name] = arrows_obj
         self.socket_manager.emit_add_geometry(arrows_obj)
-        
+
         return arrows_obj
-    
+
     def slider(self, callback: Callable, name: str, min: float = 0.0, max: float = 1.0,
-              step: float = 0.1, initial: float = 0.5, description: str = "") -> Slider:
-        
+              step: float = 0.1, initial: float = 0.5, description: str = "", group: Union[Group, str, None] = None) -> Slider:
+
         return self._add_control(
             Slider,
             callback=callback,
@@ -292,47 +303,50 @@ class BaseViewer:
             step=step,
             initial=initial,
             description=description,
+            group=group,
         )
-    
-    def button(self, callback: Callable, name: str) -> Button:
-        
-        return self._add_control(Button, callback=callback, name=name)
 
-    def download_button(self, callback: Callable, name: str, filename: str = 'download.bin') -> DownloadButton:
+    def button(self, callback: Callable, name: str, group: Union[Group, str, None] = None) -> Button:
+
+        return self._add_control(Button, callback=callback, name=name, group=group)
+
+    def download_button(self, callback: Callable, name: str, filename: str = 'download.bin', group: Union[Group, str, None] = None) -> DownloadButton:
 
         return self._add_control(
             DownloadButton,
             callback=callback,
             name=name,
             filename=filename,
+            group=group,
         )
-    
-    def label(self, callback: Callable, name: str = None, text: str = '') -> Label:
-        
+
+    def label(self, callback: Callable, name: str = None, text: str = '', group: Union[Group, str, None] = None) -> Label:
+
         if name is None:
             name = f"label_{uuid.uuid4().hex[:8]}"
-        
+
         return self._add_control(
             Label,
             callback=callback,
             name=name,
             text=text,
         )
-    
+
     def checkbox(self, callback: Callable, name: str, initial: bool = False,
-                 description: str = "") -> Checkbox:
-        
+                 description: str = "", group: Union[Group, str, None] = None) -> Checkbox:
+
         return self._add_control(
             Checkbox,
             callback=callback,
             name=name,
             initial=initial,
             description=description,
+            group=group,
         )
-    
+
     def dropdown(self, callback: Callable, name: str, options: List[str],
-                 initial: str = None, description: str = "") -> Dropdown:
-        
+                 initial: str = None, description: str = "", group: Union[Group, str, None] = None) -> Dropdown:
+
         return self._add_control(
             Dropdown,
             callback=callback,
@@ -340,31 +354,116 @@ class BaseViewer:
             options=options,
             initial=initial,
             description=description,
+            group=group,
         )
 
     def color_picker(self, callback: Callable, name: str,
-                     initial: Union[Tuple[float, float, float, float], np.ndarray] = (0.5, 0.5, 0.5, 1.0)) -> ColorPicker:
+                     initial: Union[Tuple[float, float, float, float], np.ndarray] = (0.5, 0.5, 0.5, 1.0),
+                     group: Union[Group, str, None] = None) -> ColorPicker:
 
         return self._add_control(
             ColorPicker,
             callback=callback,
             name=name,
             initial=initial,
+            group=group,
+        )
+
+    def group(self, name: str, collapsed: bool = False) -> Group:
+        """Create a collapsible group for organizing UI controls.
+
+        Parameters:
+            name (str): The name/label of the group
+            collapsed (bool): Whether the group starts collapsed (default: False)
+
+        Returns:
+            Group: The created group control
+
+        Example:
+            group = viewer.group("Settings", collapsed=True)
+            viewer.slider(callback, "param1", group=group)
+            viewer.slider(callback, "param2", group=group)
+        """
+        return self._add_control(
+            Group,
+            name=name,
+            collapsed=collapsed,
         )
 
     def add_plotly(self, spec: Dict[str, Any], name: str) -> PlotlyPlot:
         from plotly.utils import PlotlyJSONEncoder
         import json
-        
+
         spec = json.loads(json.dumps(spec, cls=PlotlyJSONEncoder))
         plot = PlotlyPlot(viewer=self, spec=spec, name=name)
         self.ui_controls[name] = plot
         self.socket_manager.emit_add_control(plot)
         return plot
-    
+
+    def add_image_gallery(self, name: str, images: Any,
+                         thumbnail_size: int = 150, columns: int = 3,
+                         rows_per_page: int = None,
+                         callback: Callable = None,
+                         group: Union[Group, str, None] = None) -> ImageGallery:
+        """Add an image gallery UI control to display images as thumbnails.
+
+        Parameters:
+            name (str): The name/id of the control
+            images: Single image or list of images. Can be:
+                - Single numpy array (H, W, 3/4)
+                - List of numpy arrays
+                - Single base64 encoded string
+                - List of base64 encoded strings
+            thumbnail_size (int): Size of thumbnails in pixels (default: 150)
+            columns (int): Number of columns in the gallery grid (default: 3)
+            rows_per_page (int, optional): Number of rows per page for pagination.
+                If None, shows all images without pagination (default: None)
+            callback (Callable, optional): Function called when an image is clicked.
+                Receives (viewer, image_index) as arguments
+            group (Group or str, optional): Group to add this control to
+
+        Returns:
+            ImageGallery: The created image gallery control
+
+        Example:
+            # Display a single image
+            viewer.add_image_gallery("my_image", image_array)
+
+            # Display multiple images with callback
+            def on_click(viewer, index):
+                print(f"Image {index} clicked!")
+
+            viewer.add_image_gallery(
+                "gallery",
+                [img1, img2, img3],
+                thumbnail_size=120,
+                columns=3,
+                callback=on_click
+            )
+
+            # Display paginated gallery
+            viewer.add_image_gallery(
+                "paginated",
+                image_list,
+                columns=4,
+                rows_per_page=2,  # Show 8 images per page (4 columns x 2 rows)
+                callback=on_click
+            )
+        """
+        return self._add_control(
+            ImageGallery,
+            name=name,
+            images=images,
+            thumbnail_size=thumbnail_size,
+            columns=columns,
+            rows_per_page=rows_per_page,
+            callback=callback,
+            group=group,
+        )
+
     def get(self, name: str) -> Any:
         return self.objects.get(name) or self.ui_controls.get(name)
-    
+
     def handle_ui_event(self, event_type: str, control_id: str, value: Any = None):
         control = self.ui_controls.get(control_id)
         if control is None:
@@ -385,12 +484,12 @@ class ViewerClient(BaseViewer):
             viewport (Tuple[int, int], optional): Width and height of the headless viewport. Defaults to (1280, 720) if headless=True.
         """
         super().__init__()
-        
+
         if not viewer_id:
             viewer_id = f"viewer_{uuid.uuid4().hex[:8]}"
-        
+
         self.viewer_id = viewer_id
-        
+
         # Default to localhost:8080 if no server URL provided
         if not server_url:
             server_url = "http://localhost:8080"
@@ -398,13 +497,13 @@ class ViewerClient(BaseViewer):
             server_url = f"http://{server_url}"
 
         base_url = server_url
-        
+
         # Add viewer_id as a query parameter to ensure it's available in the web client
         if viewer_id and '?' not in server_url:
             server_url = f"{server_url}?viewer_id={viewer_id}"
 
         self.server_url = base_url.split('?')[0]
-        
+
         print(f"Creating client connecting to: {server_url}")
         self.client = RemoteSocketIO(server_url, viewer_id)
         self.client.viewer = self  # Set the viewer reference
@@ -435,6 +534,7 @@ class ViewerClient(BaseViewer):
         # events:
         self.client.on('events.camera', self.handle_events_camera)
         self.client.on('events.inspect', self.handle_events_inspect)
+        self.client.on('events.hover', self.handle_events_hover)
         self.client.on('events.select_object', self.handle_events_select_object)
         self.client.on('events.gizmo', self.handle_events_gizmo)
         # events.control is handled internally
@@ -451,12 +551,12 @@ class ViewerClient(BaseViewer):
     def handle_ui_event_from_server(self, data):
         if data.get('viewer_id') != self.viewer_id:
             return
-            
+
         event_type = data.get('eventType')
         control_id = data.get('controlId')
         value = data.get('value')
         value = as_array(value)
-        
+
         self.handle_ui_event(event_type, control_id, value)
         self.events.trigger('control', control_id, value)
 
@@ -498,7 +598,7 @@ class ViewerClient(BaseViewer):
             'set_camera',
             {'camera': as_list(DEFAULT_CAMERA_STATE)}
         )
-        
+
         # Send all objects
         for obj in self.objects.values():
             if hasattr(obj, 'to_dict'):
@@ -518,7 +618,7 @@ class ViewerClient(BaseViewer):
 
     def camera(self, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
         """Return the current camera parameters as a dictionary containing:
-        
+
         | key        | meaning                                   | type  |
         |------------|-------------------------------------------|-------|
         | position   | camera world coords                       | ndarray |
@@ -537,7 +637,7 @@ class ViewerClient(BaseViewer):
             camera_data = as_array(self._request_data['camera_info'])
             return camera_data
         return None
-    
+
     def selected_object(self, timeout: float = 1.0) -> Optional[str]:
         """Return the currently selected object name."""
         self.emit_state_request({'event': 'request_selected_object', 'viewer_id': self.viewer_id})
@@ -582,7 +682,7 @@ class ViewerClient(BaseViewer):
                 if ext.lower() not in ['.png', '.jpg', '.jpeg']:
                     raise ValueError(f"Unsupported file extension: {ext}. Supported extensions are: .png, .jpg, .jpeg")
                 filename = filename if filename.endswith(ext) else filename + ext
-            
+
             if ext.lower() == '.png':
                 img = img.convert('RGBA')
             else:
@@ -604,7 +704,7 @@ class ViewerClient(BaseViewer):
         payload = as_list(payload)
         self.socket_manager.emit_with_fallback('set_camera', {'camera': payload})
 
-    def look_at(self, position: Union[Tuple[float, float, float], np.ndarray], 
+    def look_at(self, position: Union[Tuple[float, float, float], np.ndarray],
                 target: Union[Tuple[float, float, float], np.ndarray]) -> None:
         """Position the camera and look at ``target``.
 
@@ -620,13 +720,13 @@ class ViewerClient(BaseViewer):
         """Emit a state request to the server."""
         if data.get('viewer_id') != self.viewer_id:
             return
-        
+
         event = data.get('event') # e.g. : 'request_camera_info'
         event_basename = event.replace('request_', '') # 'camera_info'
         event_data = data.get('data', {})
         if event_basename not in self._request_events:
             raise ValueError(f"Unknown state request event: {event}")
-        
+
         self._request_threads[event_basename].clear()
         self._request_data[event_basename] = None
         event_data = as_list(event_data)
@@ -636,12 +736,12 @@ class ViewerClient(BaseViewer):
         """Handle incoming state from the frontend."""
         if data.get('viewer_id') != self.viewer_id:
             return
-        
+
         event = data.get('event') # e.g. : 'request_camera_info'
         event_basename = event.replace('request_', '') # 'camera_info'
         if event_basename not in self._request_events:
             raise ValueError(f"Unknown state request event: {event}")
-        
+
         self._request_data[event_basename] = data.get('data')
         self._request_threads[event_basename].set()
 
@@ -659,6 +759,13 @@ class ViewerClient(BaseViewer):
         inspection_data = data.get('inspection')
         inspection_data = as_array(inspection_data)
         self.events.trigger('inspect', inspection_data)
+
+    def handle_events_hover(self, data):
+        if data.get('viewer_id') != self.viewer_id:
+            return
+        hover_data = data.get('inspection')
+        hover_data = as_array(hover_data)
+        self.events.trigger('hover', hover_data)
 
     def handle_events_select_object(self, data):
         if data.get('viewer_id') != self.viewer_id:
@@ -690,7 +797,7 @@ class ViewerServer:
         self.port = port
         self.debug = debug
         self.config_path = config_path
-        
+
         from .server.app import run_standalone_server
         run_standalone_server(host=host, port=port, debug=debug, config_path=config_path)
 
@@ -708,7 +815,7 @@ def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = F
 
 def start_server(host: str = 'localhost', port: int = 8080, debug: bool = False, config_path: str = None):
     """Start a standalone server without viewer functionality
-    
+
     Args:
         host: Server host address
         port: Server port

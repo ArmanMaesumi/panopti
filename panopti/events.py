@@ -30,8 +30,8 @@ class CameraInfo:
 @dataclass
 class MeshInspectResult:
     """Inspection result data for mesh objects."""
-    face_index: int
-    vertex_indices: np.ndarray
+    face_index: Optional[int] = None
+    vertex_indices: Optional[np.ndarray] = None
 
 @dataclass
 class PointCloudInspectResult:
@@ -77,17 +77,20 @@ def _dict_to_inspect_info(data: dict) -> InspectInfo:
     if 'inspect_result' in data:
         result_data = data['inspect_result']
         object_type = data['object_type']
-        
+
         if object_type in ['mesh', 'animated_mesh']:
+            # face_index may be missing for box selections; vertex_indices may be present
+            face_idx = result_data.get('face_index') if isinstance(result_data, dict) else None
+            vert_idxs = result_data.get('vertex_indices') if isinstance(result_data, dict) else None
             inspect_result = MeshInspectResult(
-                face_index=result_data['face_index'],
-                vertex_indices=np.asarray(result_data['vertex_indices'], dtype=np.int32)
+                face_index=face_idx,
+                vertex_indices=np.asarray(vert_idxs, dtype=np.int32) if vert_idxs is not None else None
             )
         elif object_type == 'points':
             inspect_result = PointCloudInspectResult(
                 point_index=np.asarray(result_data['point_index'], dtype=np.int32)
             )
-    
+
     return InspectInfo(
         object_name=data['object_name'],
         object_type=data['object_type'],
@@ -100,19 +103,19 @@ def _dict_to_gizmo_info(data: dict) -> GizmoInfo:
     """Convert dictionary to GizmoInfo dataclass."""
     trans_data = data['trans']
     prev_trans_data = data['prev_trans']
-    
+
     trans = TransformData(
         position=np.asarray(trans_data['position'], dtype=np.float32),
         rotation=np.asarray(trans_data['rotation'], dtype=np.float32),
         scale=np.asarray(trans_data['scale'], dtype=np.float32)
     )
-    
+
     prev_trans = TransformData(
         position=np.asarray(prev_trans_data['position'], dtype=np.float32),
         rotation=np.asarray(prev_trans_data['rotation'], dtype=np.float32),
         scale=np.asarray(prev_trans_data['scale'], dtype=np.float32)
     )
-    
+
     return GizmoInfo(
         object_name=data['object_name'],
         object_type=data['object_type'],
@@ -127,7 +130,8 @@ class EventDispatcher:
         self.viewer = viewer
         self._callbacks: Dict[str, List[Callable]] = {
             'camera': [],
-            'inspect': []
+            'inspect': [],
+            'hover': []
         }
         self._throttle_timestamps: Dict[str, float] = {}
 
@@ -140,14 +144,14 @@ class EventDispatcher:
                 def throttled_func(viewer, *args, **kwargs):
                     current_time = time.time() * 1000  # Convert to milliseconds
                     func_id = f"{event_name}_{func.__name__}_{id(func)}"
-                    
+
                     last_call = self._throttle_timestamps.get(func_id, 0)
                     if current_time - last_call >= throttle:
                         self._throttle_timestamps[func_id] = current_time
                         return func(viewer, *args, **kwargs)
                     # If throttled, silently ignore the call
                     return None
-                
+
                 self._callbacks.setdefault(event_name, []).append(throttled_func)
                 return func
             else:
@@ -157,14 +161,14 @@ class EventDispatcher:
         return decorator
 
     def camera(self, throttle: int = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """The `camera` event is triggered when the user manipulates the viewer 
-        camera (e.g. orbit, pan, zoom). This event provides a `CameraInfo` object 
+        """The `camera` event is triggered when the user manipulates the viewer
+        camera (e.g. orbit, pan, zoom). This event provides a `CameraInfo` object
         containing information about the camera's current state.
-        
+
         Args:
-            throttle (int, optional): Throttle interval in milliseconds. If provided, 
+            throttle (int, optional): Throttle interval in milliseconds. If provided,
                 the callback will only be called at most once per throttle interval.
-        
+
          Example usage:
         ```python
         @viewer.events.camera()
@@ -177,7 +181,7 @@ class EventDispatcher:
             yaw = math.atan2(cx - mx, cz - mz)
             mesh.rotation = [0, yaw, 0]
             mesh.update(rotation=[0, yaw, 0])
-        
+
         # Or with throttling (100ms interval)
         @viewer.events.camera(throttle=100)
         def throttled_camera_event(viewer, camera_info):
@@ -224,7 +228,24 @@ class EventDispatcher:
             self._callbacks.setdefault('inspect', []).append(func)
             return func
         return decorator
-    
+
+    def hover(self, throttle: int = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """The `hover` event is triggered when the mouse hovers over geometry in the viewer.
+
+        This provides the same data structure as `inspect` (an `InspectInfo` object),
+        but it is emitted continuously while the cursor moves. Use the `throttle`
+        argument to limit how often your callback is invoked.
+
+        Example usage:
+        ```python
+        @viewer.events.hover(throttle=100)
+        def on_hover(viewer, info):
+            # Show hovered object in your UI, etc.
+            print('Hovering over', info.object_name)
+        ```
+        """
+        return self._create_throttled_decorator('hover', throttle)
+
     def select_object(self) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """The `select_object` event is triggered when a geometric structure is selected in the viewer -- either by clicking on the object directly or selecting it in the layers panel.
         Example usage:
@@ -239,71 +260,71 @@ class EventDispatcher:
             self._callbacks.setdefault('select_object', []).append(func)
             return func
         return decorator
-    
+
     def control(self, throttle: int = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """The `control` event is triggered when any control element is interacted with,
         e.g. when a slider is moved or a checkbox is toggled.
-        
+
         Args:
-            throttle (int, optional): Throttle interval in milliseconds. If provided, 
+            throttle (int, optional): Throttle interval in milliseconds. If provided,
                 the callback will only be called at most once per throttle interval.
-        
+
         Example usage:
         ```python
         @viewer.events.control()
         def control_event(viewer, control_name, value):
             print(f"User updated {control_name} to {value}")
-        
+
         # Or with throttling (50ms interval)
         @viewer.events.control(throttle=50)
         def throttled_control_event(viewer, control_name, value):
             print(f"Throttled control update: {control_name} = {value}")
         ```
         `control_name: str` is the name of the control element
-        
+
         `value` is the control element's new value
         """
         return self._create_throttled_decorator('control', throttle)
-    
+
     def update_object(self, throttle: int = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """The `update_object` event is triggered when any geometric object has 
+        """The `update_object` event is triggered when any geometric object has
         an attribute updated, e.g. through `.update(...)` or when the transformation
         panel is used.
-        
+
         Args:
-            throttle (int, optional): Throttle interval in milliseconds. If provided, 
+            throttle (int, optional): Throttle interval in milliseconds. If provided,
                 the callback will only be called at most once per throttle interval.
-        
+
         Example usage:
         ```python
         @viewer.events.update_object()
         def update_object_event(viewer, object_name, data):
             print(f"Object {object_name} updated with attributes: {data.keys()}")
-        
+
         # Or with throttling (100ms interval)
         @viewer.events.update_object(throttle=100)
         def throttled_update_event(viewer, object_name, data):
             print(f"Throttled object update: {object_name}")
         ```
         `object_name: str` is the updated object's name
-        
+
         `data: dict` holds the updated attributes of the object, e.g. `{'vertices': ...}`
         """
         return self._create_throttled_decorator('update_object', throttle)
 
     def gizmo(self, throttle: int = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """The `gizmo` event is triggered when the gizmo is used to transform an object.
-        
+
         Args:
-            throttle (int, optional): Throttle interval in milliseconds. If provided, 
+            throttle (int, optional): Throttle interval in milliseconds. If provided,
                 the callback will only be called at most once per throttle interval.
-        
+
         Example usage:
         ```python
         @viewer.events.gizmo()
         def gizmo_event(viewer, gizmo_info):
             print(f"Gizmo was used to transform {gizmo_info.object_name}")
-        
+
         # Or with throttling (50ms interval)
         @viewer.events.gizmo(throttle=50)
         def throttled_gizmo_event(viewer, gizmo_info):
@@ -329,9 +350,11 @@ class EventDispatcher:
                     args = (_dict_to_camera_info(args[0]),) + args[1:]
                 elif event == 'inspect' and args and isinstance(args[0], dict):
                     args = (_dict_to_inspect_info(args[0]),) + args[1:]
+                elif event == 'hover' and args and isinstance(args[0], dict):
+                    args = (_dict_to_inspect_info(args[0]),) + args[1:]
                 elif event == 'gizmo' and args and isinstance(args[0], dict):
                     args = (_dict_to_gizmo_info(args[0]),) + args[1:]
-                
+
                 cb(self.viewer, *args, **kwargs)
             except Exception as exc:
                 print(f'Error in {event} callback {cb}: {exc}')

@@ -57,7 +57,7 @@ class SocketManager:
             requests.post(f"{url}/http_event", data=packed, headers=headers)
         except Exception as exc:
             self.emit(event, as_list(data))
-    
+
     @property
     def socketio(self):
         if hasattr(self.viewer, 'app') and self.viewer.app:
@@ -80,7 +80,7 @@ class SocketManager:
                 self._emit_http(event, data)
         else:
             self.emit(event, data)
-    
+
     def emit_add_geometry(self, geometry) -> None:
         data = as_list(geometry.to_dict())
         raw = geometry.to_dict(serialize=False)
@@ -95,7 +95,7 @@ class SocketManager:
         else:
             raw = None
         self.emit_with_fallback("update_object", data, raw)
-    
+
     def emit_delete_object(self, object_id: str) -> None:
         data = {
             "id": object_id
@@ -113,14 +113,21 @@ class SocketManager:
             "data": base64.b64encode(file_bytes).decode("utf-8"),
         }
         self.emit_with_fallback("download_file", data)
-    
+
     def emit_update_label(self, label_id: str, text: str) -> None:
         data = {
             "id": label_id,
             "text": text
         }
         self.emit('update_label', data)
-    
+
+    def emit_update_image_gallery(self, gallery_id: str, images: list) -> None:
+        data = {
+            "id": gallery_id,
+            "images": images
+        }
+        self.emit_with_fallback('update_image_gallery', data)
+
     def emit_delete_control(self, control_id: str) -> None:
         data = {
             "id": control_id
@@ -138,7 +145,7 @@ class RemoteSocketIO:
         self.viewer_id = viewer_id
         self.connected = False
         self.viewer = None  # Will be set by the ViewerClient
-        
+
     def connect(self):
         if not self.connected:
             try:
@@ -164,16 +171,16 @@ class RemoteSocketIO:
                     "Exiting...\n"
                 )
                 raise RuntimeError(msg) from exc
-    
+
     def disconnect(self):
         if self.connected:
             self.client.disconnect()
             self.connected = False
-    
+
     def emit(self, event: str, data: Dict[str, Any]) -> None:
         if not self.connected:
             self.connect()
         self.client.emit(event, data)
-        
+
     def on(self, event: str, handler):
         self.client.on(event, handler)

@@ -36,6 +36,11 @@ export function initComms(sceneManagerRef, { setIsLoading, setControls, setConso
         setControls && setControls(prev => prev.map(c => c.id === data.id ? { ...c, text: marked.parse(data.text) } : c));
     });
 
+    socket.on('update_image_gallery', data => {
+        setConnectionStatus('connected');
+        setControls && setControls(prev => prev.map(c => c.id === data.id ? { ...c, images: data.images } : c));
+    });
+
     socket.on('delete_control', data => {
         setConnectionStatus('connected');
         setControls && setControls(prev => prev.filter(c => c.id !== data.id));

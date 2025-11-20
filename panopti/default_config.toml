@@ -49,3 +49,4 @@ infobar.enabled = true
 slider = 25
 transform = 25
 camera = 25
+hover = 50

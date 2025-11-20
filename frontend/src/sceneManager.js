@@ -138,7 +138,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
     );
     camera.position.set(...cameraConfig.position);
     camera.lookAt(...cameraConfig.target);
-    
+
     let renderSettings = {
         wireframe: 0, // 0: Default (respect per-object), 1: Surface, 2: Wireframe + Surface, 3: Wireframe Only
         flatShading: false,
@@ -146,8 +146,9 @@ export function createSceneManager(container, socket, callbacks = {}, background
         showGrid: true,
         showAxes: true,
         inspectMode: false,
+        boxInspectMode: false,
     };
-    
+
     const renderer = new THREE.WebGLRenderer({
         antialias: true,
         alpha: true,
@@ -162,7 +163,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
     renderer.toneMappingExposure = 1.0;
     THREE.ColorManagement.enabled = true;
     container.appendChild(renderer.domElement);
-    
+
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.25;
@@ -175,17 +176,17 @@ export function createSceneManager(container, socket, callbacks = {}, background
             socket.emit('events.camera', payload);
         }
     }, CONSTANTS.DEBOUNCE_CAMERA));
-    
+
     // Initialize gizmo (transform controls)
     const gizmo = new Gizmo(scene, camera, renderer, controls, socket);
-    
+
     // Set up gizmo update callback to propagate changes to backend
     gizmo.setUpdateCallback((transforms) => {
         if (selectedObject && selectedObject.data) {
             const objectId = selectedObject.data.id;
             // Update the object locally
             updateObject(objectId, transforms);
-            
+
             // Emit to backend
             if (socket) {
                 const payload = { id: objectId, updates: transforms };
@@ -197,17 +198,17 @@ export function createSceneManager(container, socket, callbacks = {}, background
 
     const gridHelper = new THREE.GridHelper(10, 10);
     scene.add(gridHelper);
-    
+
     const axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
-    
+
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     const normalHelpers = {};
     const objects = {};
-    
+
     let selectedObject = null;
-    
+
     // Create inspection text overlay
     const inspectionDiv = document.createElement('div');
     inspectionDiv.style.position = 'absolute';
@@ -237,13 +238,19 @@ export function createSceneManager(container, socket, callbacks = {}, background
     closeBtn.style.cursor = 'pointer';
     closeBtn.style.pointerEvents = 'auto';
     inspectionDiv.appendChild(closeBtn);
-    
+
     // Visual inspection helpers
     let inspectionHighlight = null;
     let inspectionVertexPoints = null;
     let inspectionPoint = null;
     let inspectionData = null;
-    
+
+    // Box selection (rubber-band) helpers
+    let selectionDiv = null;
+    let selectionStart = null;
+    let selectionActive = false;
+    let selectionThreshold = 4; // px
+
     // Function to clear inspection highlights
     function clearInspectionHighlights() {
         if (inspectionHighlight) {
@@ -269,6 +276,16 @@ export function createSceneManager(container, socket, callbacks = {}, background
         clearInspectionHighlights();
     });
 
+    // Create selection (rubber-band) div
+    selectionDiv = document.createElement('div');
+    selectionDiv.style.position = 'absolute';
+    selectionDiv.style.border = '1px dashed rgba(0,0,0,0.8)';
+    selectionDiv.style.background = 'rgba(0,0,0,0.05)';
+    selectionDiv.style.pointerEvents = 'none';
+    selectionDiv.style.display = 'none';
+    selectionDiv.style.zIndex = '1001';
+    container.appendChild(selectionDiv);
+
     function computeBarycentric(p, a, b, c) {
         const v0 = b.clone().sub(a);
         const v1 = c.clone().sub(a);
@@ -284,14 +301,24 @@ export function createSceneManager(container, socket, callbacks = {}, background
         const u = 1 - v - w;
         return { u, v, w };
     }
-    
+
+    // Helper to convert a world Vector3 to screen pixel coordinates relative to container
+    function worldToScreen(worldVec3) {
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const proj = worldVec3.clone().project(camera);
+        const x = (proj.x + 1) / 2 * width;
+        const y = (1 - proj.y) / 2 * height;
+        return { x, y };
+    }
+
     // Add click event listener for object selection and inspection
     container.addEventListener('click', (event) => {
         // Check if click originated from a UI panel - if so, ignore it
         // TODO: this is a hack we should find a better way to do this
         const target = event.target;
-        const isFromUIPanel = target.closest('.console-window') || 
-                             target.closest('.layers-panel') || 
+        const isFromUIPanel = target.closest('.console-window') ||
+                             target.closest('.layers-panel') ||
                              target.closest('.transform-panel') ||
                              target.closest('.ui-panel') ||
                              target.closest('.scene-toolbar') ||
@@ -305,28 +332,28 @@ export function createSceneManager(container, socket, callbacks = {}, background
         const rect = container.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-        
+
         raycaster.setFromCamera(mouse, camera);
-        
+
         if (renderSettings.inspectMode) {
             raycaster.params.Line.threshold = 0.1;
         }
-        
+
         // Get all selectable objects
         const selectableObjects = Object.values(objects)
             .map(obj => obj.object)
             .filter(obj => obj.visible);
-        
+
         // In inspection mode, we want to intersect with the actual mesh objects, not wireframe overlays
         let intersectTargets = selectableObjects;
         let temporaryMaterials = new Map();
-        
+
         if (renderSettings.inspectMode) {
             // Filter to only mesh objects and ensure we hit the main mesh, not wireframe helpers
             intersectTargets = selectableObjects.filter(obj => {
                 return !(obj.material && obj.material.type === 'LineBasicMaterial');
             });
-            
+
             // For wireframe materials, temporarily replace with solid material for raycasting
             intersectTargets.forEach(obj => {
                 if (obj.material && obj.material.wireframe === true) {
@@ -340,25 +367,25 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 }
             });
         }
-        
+
         const intersects = raycaster.intersectObjects(intersectTargets, false);
-        
+
         // Restore original materials
         temporaryMaterials.forEach((originalMaterial, obj) => {
             obj.material.dispose();
             obj.material = originalMaterial;
         });
-        
+
         if (intersects.length > 0) {
             const intersection = intersects[0];
             const intersectedObject = intersection.object;
             let topLevelObject = intersectedObject;
-            
+
             // Traverse up the hierarchy if needed
             while (topLevelObject.parent && topLevelObject.parent !== scene) {
                 topLevelObject = topLevelObject.parent;
             }
-            
+
             // Find the object data for the intersected object
             let objectData = null;
             for (const [id, obj] of Object.entries(objects)) {
@@ -368,7 +395,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 }
             }
 
-            if (renderSettings.inspectMode && objectData && (objectData.type === 'mesh' || objectData.type === 'animated_mesh' || objectData.type === 'points')) {
+            if (renderSettings.inspectMode && !renderSettings.boxInspectMode && objectData && (objectData.type === 'mesh' || objectData.type === 'animated_mesh' || objectData.type === 'points')) {
                 clearInspectionHighlights();
 
                 const faceIndex = intersection.faceIndex;
@@ -530,21 +557,23 @@ export function createSceneManager(container, socket, callbacks = {}, background
                     }
                 }
             } else {
-                // Regular selection mode
-                if (objectData) {
+                // Regular selection mode (skip if boxInspectMode active)
+                if (!renderSettings.boxInspectMode) {
+                    if (objectData) {
                     selectedObject = { ...objectData };
-                    
+
                     // Attach gizmo to selected object if enabled
                     if (gizmo.isEnabled()) {
                         gizmo.attach(objectData.object);
                         gizmo.setSelectedObject({ type: objectData.type, data: objectData.data });
                     }
-                    
+
                     // Notify React component about selection
                     if (typeof onSelectObject === 'function') {
                         onSelectObject(null);
                         onSelectObject({ type: objectData.type, data: objectData.data });
                         event_select_object(objectData.data.id);
+                    }
                     }
                 }
             }
@@ -558,11 +587,256 @@ export function createSceneManager(container, socket, callbacks = {}, background
             //         onSelectObject(null);
             //     }
             // }
-            
+
             // Keep inspection overlay visible in inspection mode
         }
     });
-    
+
+    // Pointer down/up handlers to support box (rubber-band) selection for inspection
+    container.addEventListener('pointerdown', (event) => {
+        if (!renderSettings.boxInspectMode) return;
+        // ignore UI panel origins
+        const target = event.target;
+        const isFromUIPanel = target.closest('.console-window') ||
+                             target.closest('.layers-panel') ||
+                             target.closest('.transform-panel') ||
+                             target.closest('.ui-panel') ||
+                             target.closest('.scene-toolbar') ||
+                             target.closest('.render-toolbar') ||
+                             target.closest('.lighting-toolbar') ||
+                             target.closest('.info-bar');
+        if (isFromUIPanel) return;
+
+        const rect = container.getBoundingClientRect();
+        selectionStart = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        selectionActive = true;
+        selectionDiv.style.left = selectionStart.x + 'px';
+        selectionDiv.style.top = selectionStart.y + 'px';
+        selectionDiv.style.width = '0px';
+        selectionDiv.style.height = '0px';
+        selectionDiv.style.display = 'none';
+    });
+
+    container.addEventListener('pointermove', (event) => {
+        // existing pointermove handler uses handlePointerMove; we keep that for hover
+        // Only update rubber-band if active
+        if (!selectionActive || !selectionStart) return;
+        const rect = container.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        const minX = Math.min(selectionStart.x, x);
+        const minY = Math.min(selectionStart.y, y);
+        const w = Math.abs(x - selectionStart.x);
+        const h = Math.abs(y - selectionStart.y);
+        if (w < selectionThreshold && h < selectionThreshold) {
+            selectionDiv.style.display = 'none';
+            return;
+        }
+        selectionDiv.style.display = 'block';
+        selectionDiv.style.left = minX + 'px';
+        selectionDiv.style.top = minY + 'px';
+        selectionDiv.style.width = w + 'px';
+        selectionDiv.style.height = h + 'px';
+    });
+
+    container.addEventListener('pointerup', (event) => {
+        if (!selectionActive || !selectionStart) return;
+        selectionActive = false;
+        const rect = container.getBoundingClientRect();
+        const end = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const minX = Math.min(selectionStart.x, end.x);
+        const minY = Math.min(selectionStart.y, end.y);
+        const maxX = Math.max(selectionStart.x, end.x);
+        const maxY = Math.max(selectionStart.y, end.y);
+        selectionDiv.style.display = 'none';
+
+        // If selection too small, ignore (click handled elsewhere)
+        if (Math.abs(end.x - selectionStart.x) < selectionThreshold && Math.abs(end.y - selectionStart.y) < selectionThreshold) {
+            selectionStart = null;
+            return;
+        }
+
+        // Determine target object under the center of the selection area
+        const centerScreen = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+        mouse.x = (centerScreen.x / rect.width) * 2 - 1;
+        mouse.y = - (centerScreen.y / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const selectableObjects = Object.values(objects).map(obj => obj.object).filter(o => o.visible);
+        const intersects = raycaster.intersectObjects(selectableObjects, true);
+        if (intersects.length === 0) {
+            selectionStart = null;
+            return;
+        }
+        let topLevelObject = intersects[0].object;
+        const centerIntersectionPoint = intersects[0].point.clone();
+        while (topLevelObject.parent && topLevelObject.parent !== scene) topLevelObject = topLevelObject.parent;
+
+        // Find objectData
+        let objectData = null;
+        for (const [id, obj] of Object.entries(objects)) {
+            if (obj.object === topLevelObject) {
+                objectData = obj;
+                break;
+            }
+        }
+
+        if (!objectData || !(objectData.type === 'mesh' || objectData.type === 'animated_mesh' || objectData.type === 'points')) {
+            selectionStart = null;
+            return;
+        }
+
+        // Collect vertex indices within the box for mesh/animated_mesh; for points, check instances
+        const targetGeom = topLevelObject.geometry;
+        const posAttr = targetGeom ? targetGeom.getAttribute('position') : null;
+        const foundIndices = [];
+        if (posAttr) {
+            const vertexCount = posAttr.count;
+            const worldMatrix = topLevelObject.matrixWorld;
+            const tmpVec = new THREE.Vector3();
+            for (let i = 0; i < vertexCount; i++) {
+                tmpVec.set(
+                    posAttr.array[i * 3],
+                    posAttr.array[i * 3 + 1],
+                    posAttr.array[i * 3 + 2]
+                );
+                tmpVec.applyMatrix4(worldMatrix);
+                const screen = worldToScreen(tmpVec);
+                // screen coords are relative to container
+                if (screen.x >= minX && screen.x <= maxX && screen.y >= minY && screen.y <= maxY) {
+                    foundIndices.push(i);
+                }
+            }
+        }
+
+        // Highlight found vertices
+        clearInspectionHighlights();
+        if (foundIndices.length > 0) {
+            const pointsGeometry = new THREE.BufferGeometry();
+            const pointPositions = [];
+            const worldMatrix = topLevelObject.matrixWorld;
+            const tmpVec = new THREE.Vector3();
+            for (const idx of foundIndices) {
+                tmpVec.set(
+                    posAttr.array[idx * 3],
+                    posAttr.array[idx * 3 + 1],
+                    posAttr.array[idx * 3 + 2]
+                );
+                tmpVec.applyMatrix4(worldMatrix);
+                pointPositions.push(tmpVec.x, tmpVec.y, tmpVec.z);
+            }
+            pointsGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pointPositions), 3));
+            const pointsMaterial = new THREE.PointsMaterial({ color: 0x00ffff, size: 6, sizeAttenuation: false });
+            inspectionVertexPoints = new THREE.Points(pointsGeometry, pointsMaterial);
+            scene.add(inspectionVertexPoints);
+
+            // Emit inspection event with box selection results
+            if (socket) {
+                const payload = {
+                    inspection: {
+                            object_name: objectData.data.id,
+                            object_type: objectData.type,
+                            inspect_result: {
+                                box: true,
+                                vertex_indices: foundIndices
+                            },
+                            world_coords: [centerIntersectionPoint.x, centerIntersectionPoint.y, centerIntersectionPoint.z],
+                            screen_coords: [minX, minY, maxX, maxY]
+                        }
+                };
+                if (window.viewerId) payload.viewer_id = window.viewerId;
+                socket.emit('events.inspect', payload);
+            }
+        }
+
+        selectionStart = null;
+    });
+
+    // Hover handling: raycast on pointer move and emit minimal hover payload
+    const emitHover = throttle((hoverPayload) => {
+        if (socket) {
+            if (window.viewerId) hoverPayload.viewer_id = window.viewerId;
+            socket.emit('events.hover', hoverPayload);
+        }
+    }, CONSTANTS.DEBOUNCE_HOVER);
+
+    function handlePointerMove(event) {
+        const target = event.target;
+        const isFromUIPanel = target.closest('.console-window') ||
+                             target.closest('.layers-panel') ||
+                             target.closest('.transform-panel') ||
+                             target.closest('.ui-panel') ||
+                             target.closest('.scene-toolbar') ||
+                             target.closest('.render-toolbar') ||
+                             target.closest('.lighting-toolbar') ||
+                             target.closest('.info-bar');
+        if (isFromUIPanel) return;
+
+        const rect = container.getBoundingClientRect();
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+
+        // Get all selectable objects
+        const selectableObjects = Object.values(objects)
+            .map(obj => obj.object)
+            .filter(obj => obj.visible);
+
+        const intersects = raycaster.intersectObjects(selectableObjects, true);
+        if (intersects.length === 0) return;
+
+        const intersection = intersects[0];
+        let topLevelObject = intersection.object;
+        while (topLevelObject.parent && topLevelObject.parent !== scene) {
+            topLevelObject = topLevelObject.parent;
+        }
+
+        let objectData = null;
+        for (const [id, obj] of Object.entries(objects)) {
+            if (obj.object === topLevelObject) {
+                objectData = obj;
+                break;
+            }
+        }
+        if (!objectData) return;
+
+        const payload = {
+            inspection: {
+                object_name: objectData.data.id,
+                object_type: objectData.type,
+                world_coords: [intersection.point.x, intersection.point.y, intersection.point.z],
+                screen_coords: [event.clientX - rect.left, event.clientY - rect.top]
+            }
+        };
+
+        // Add basic geometry-specific info if available (face index for meshes, instance id for points)
+        if ((objectData.type === 'mesh' || objectData.type === 'animated_mesh') && intersection.faceIndex !== undefined) {
+            payload.inspection.inspect_result = {
+                face_index: intersection.faceIndex,
+                vertex_indices: (function() {
+                    const geom = intersection.object.geometry;
+                    if (geom && geom.index) {
+                        const a = geom.index.array[intersection.faceIndex * 3];
+                        const b = geom.index.array[intersection.faceIndex * 3 + 1];
+                        const c = geom.index.array[intersection.faceIndex * 3 + 2];
+                        return [a, b, c];
+                    } else if (geom) {
+                        const a = intersection.faceIndex * 3;
+                        return [a, a + 1, a + 2];
+                    }
+                    return [];
+                })()
+            };
+        } else if (objectData.type === 'points' && intersection.instanceId !== undefined) {
+            payload.inspection.inspect_result = { point_index: intersection.instanceId };
+        }
+
+        emitHover(payload);
+    }
+
+    // Attach pointer move listener
+    container.addEventListener('pointermove', handlePointerMove);
+
     // Socket event handlers
     socket.on('add_mesh', (data) => {
         addMesh(data);
@@ -570,28 +844,28 @@ export function createSceneManager(container, socket, callbacks = {}, background
             onSceneObjectsChange();
         }
     });
-    
+
     socket.on('add_animated_mesh', (data) => {
         addAnimatedMesh(data);
         if (typeof onSceneObjectsChange === 'function') {
             onSceneObjectsChange();
         }
     });
-    
+
     socket.on('add_points', (data) => {
         addPoints(data);
         if (typeof onSceneObjectsChange === 'function') {
             onSceneObjectsChange();
         }
     });
-    
+
     socket.on('add_arrows', (data) => {
         addArrows(data);
         if (typeof onSceneObjectsChange === 'function') {
             onSceneObjectsChange();
         }
     });
-    
+
     socket.on('update_object', (data) => {
         const _selectedObject = selectedObject ? { ...selectedObject } : null;
 
@@ -615,7 +889,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
         setCamera(data.camera);
     });
-    
+
     socket.on('delete_object', (data) => {
         deleteObject(data.id);
         if (typeof onSceneObjectsChange === 'function') {
@@ -667,23 +941,23 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
             });
     });
-    
+
     // Scene management functions
     function addMesh(data) {
         if (objects[data.id]) {
             deleteObject(data.id);
         }
-        
+
         let geometry = new THREE.BufferGeometry();
-        
+
         const vertices = new Float32Array(data.vertices.flat());
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-        
+
         if (data.faces && data.faces.length > 0) {
             const indices = new Uint32Array(data.faces.flat());
             geometry.setIndex(new THREE.BufferAttribute(indices, 1));
         }
-        
+
         let vcolors = false;
         let fcolors = false;
         if (data.vertex_colors) {
@@ -701,7 +975,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
             fcolors = true;
         }
-        
+
         let material;
         if (data.material) {
             // Create material from backend data
@@ -723,10 +997,10 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
 
         const originalWireframe = material.wireframe;
-        if (renderSettings.wireframe === 1) { 
+        if (renderSettings.wireframe === 1) {
             // surface only
             material.wireframe = false;
-        } else if (renderSettings.wireframe > 1) { 
+        } else if (renderSettings.wireframe > 1) {
             // wireframe + surface or wireframe only
             material.wireframe = true;
         }
@@ -737,20 +1011,20 @@ export function createSceneManager(container, socket, callbacks = {}, background
         mesh.position.set(data.position[0], data.position[1], data.position[2]);
         mesh.rotation.set(data.rotation[0], data.rotation[1], data.rotation[2]);
         mesh.scale.set(data.scale[0], data.scale[1], data.scale[2]);
-        
+
         if (!geometry.attributes.normal) {
             geometry.computeVertexNormals();
         }
-        
+
         mesh.visible = data.visible;
         scene.add(mesh);
-        
+
         if (renderSettings.showNormals) {
             const normalHelper = new VertexNormalsHelper(mesh, 0.2, 0x00ff00, 1);
             scene.add(normalHelper);
             normalHelpers[data.id] = normalHelper;
         }
-        
+
         // Store original opacity for visibility toggle functionality
         if (!data.originalOpacity) {
             if (data.material && data.material.opacity !== undefined) {
@@ -759,7 +1033,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 data.originalOpacity = data.opacity || 1.0;
             }
         }
-        
+
         objects[data.id] = {
             object: mesh,
             type: 'mesh',
@@ -769,7 +1043,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         mesh.userData.originalWireframe = originalWireframe;
         applyRenderSettings(renderSettings);
     }
-    
+
     function addAnimatedMesh(data) {
         if (objects[data.id]) {
             deleteObject(data.id);
@@ -781,10 +1055,10 @@ export function createSceneManager(container, socket, callbacks = {}, background
             console.error('data.vertices:', data.vertices);
             return;
         }
-        
+
         const numFrames = data.vertices.length;
         const flatVerticesPerFrame = data.vertices[0].length;
-        
+
         // Check if vertices are flattened (3*vertices) and reshape if needed
         let reshapedVertices = data.vertices;
         let numVertices;
@@ -802,7 +1076,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         } else {
             numVertices = data.vertices[0].length;
         }
-        
+
         // Update data.vertices with reshaped version
         data.vertices = reshapedVertices;
         let geometry = new THREE.BufferGeometry();
@@ -909,7 +1183,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         mesh.userData.originalWireframe = originalWireframe;
         applyRenderSettings(renderSettings);
     }
-    
+
     function addPoints(data) {
         if (objects[data.id]) {
             deleteObject(data.id);
@@ -937,10 +1211,10 @@ export function createSceneManager(container, socket, callbacks = {}, background
 
         const spheres = new THREE.InstancedMesh(geometry, material, count);
         const dummy = new THREE.Object3D();
-        
+
         // Apply initial scale to point positions if provided
         const scale = data.scale || [1, 1, 1];
-        
+
         for (let i = 0; i < count; i++) {
             const p = data.points[i];
             // Apply scale to point position
@@ -965,7 +1239,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         spheres.castShadow = true;
         spheres.receiveShadow = true;
         spheres.visible = data.visible;
-        
+
         // Apply transformations (except scale for points - handled in updateObject)
         if (data.position) {
             spheres.position.set(data.position[0], data.position[1], data.position[2]);
@@ -974,21 +1248,21 @@ export function createSceneManager(container, socket, callbacks = {}, background
             spheres.rotation.set(data.rotation[0], data.rotation[1], data.rotation[2]);
         }
         // Note: Scale for points is handled by scaling the point positions, not the object
-        
+
         scene.add(spheres);
 
         // Store original opacity for visibility toggle functionality
         if (!data.originalOpacity) {
             data.originalOpacity = data.opacity;
         }
-        
+
         objects[data.id] = {
             object: spheres,
             type: 'points',
             data: data
         };
     }
-    
+
     const ARROW_BODY = new THREE.CylinderGeometry( 1, 1, 1, 12 ).rotateX( Math.PI/2).translate( 0, 0, 0.5 );
     const ARROW_HEAD = new THREE.ConeGeometry( 1, 1, 12 ).rotateX( Math.PI/2).translate( 0, 0, -0.5 );
     function customArrow( fx, fy, fz, ix, iy, iz, color, data) {
@@ -1005,7 +1279,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             head.scale.set( 3*thickness, 3*thickness, 10*thickness );
         var arrow = new THREE.Group( );
             arrow.position.set( ix, iy, iz );
-            arrow.lookAt( fx, fy, fz );	
+            arrow.lookAt( fx, fy, fz );
             arrow.add( body, head );
         return arrow;
     }
@@ -1013,8 +1287,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
     function addArrows(data) {
         if (objects[data.id]) {
             deleteObject(data.id);
-        }    
-        
+        }
+
         const group = new THREE.Group();
         const starts = data.starts;
         const ends = data.ends;
@@ -1030,9 +1304,9 @@ export function createSceneManager(container, socket, callbacks = {}, background
             );
             group.add(arrowHelper);
         }
-        
+
         group.visible = data.visible !== undefined ? data.visible : true;
-        
+
         // Apply transformations
         if (data.position) {
             group.position.set(data.position[0], data.position[1], data.position[2]);
@@ -1043,21 +1317,21 @@ export function createSceneManager(container, socket, callbacks = {}, background
         if (data.scale) {
             group.scale.set(data.scale[0], data.scale[1], data.scale[2]);
         }
-        
+
         scene.add(group);
-        
+
         // Store original opacity for visibility toggle functionality
         if (!data.originalOpacity) {
             data.originalOpacity = data.opacity;
         }
-        
+
         objects[data.id] = {
             object: group,
             type: 'arrows',
             data: data
         };
     }
-    
+
     function updateObject(id, updates) {
         // console.log('updateObject', id, updates);
         const objData = objects[id];
@@ -1076,7 +1350,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         // Check if any geometry properties need updating
         const geometryProps = GEOMETRY_PROPERTIES[objData.type] || [];
         const hasGeometryUpdates = geometryProps.some(prop => updates[prop] !== undefined);
-        
+
         // Try in-place geometry updates first
         if (hasGeometryUpdates) {
             const needsRebuild = !tryInPlaceGeometryUpdate(objData, updates);
@@ -1264,7 +1538,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         const newData = { ...data, ...updates };
 
         deleteObject(data.id);
-        
+
         switch (type) {
             case 'mesh':
                 addMesh(newData);
@@ -1339,7 +1613,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         if (updates.opacity !== undefined) {
             data.opacity = updates.opacity;
             data.originalOpacity = updates.opacity;
-            
+
             if (type === 'arrows') {
                 // Arrows have multiple materials (one per child)
                 object.children.forEach(child => {
@@ -1357,8 +1631,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
 
         if (updates.material !== undefined && object.material) {
             const newMaterial = updateMaterial(object.material, updates.material);
-            
-            // if mat type changed we reassign using newMaterial 
+
+            // if mat type changed we reassign using newMaterial
             // (otherwise updates are done in-place on `object.material` in `updateMaterial`)
             if (newMaterial.type !== object.material.type) {
                 const vertexColors = object.material.vertexColors;
@@ -1366,7 +1640,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 object.material = newMaterial;
                 object.material.vertexColors = vertexColors;
             }
-            
+
             data.material = updates.material;
             if (updates.material.opacity !== undefined && !data.originalOpacity) {
                 data.originalOpacity = updates.material.opacity;
@@ -1389,15 +1663,15 @@ export function createSceneManager(container, socket, callbacks = {}, background
             }
         }
     }
-    
+
     function deleteObject(id) {
         const objData = objects[id];
         if (!objData) return;
-        
+
         const { object } = objData;
-        
+
         scene.remove(object);
-        
+
         if (normalHelpers[id]) {
             scene.remove(normalHelpers[id]);
             if (normalHelpers[id].geometry) {
@@ -1408,11 +1682,11 @@ export function createSceneManager(container, socket, callbacks = {}, background
             }
             delete normalHelpers[id];
         }
-        
+
         if (object.geometry) {
             object.geometry.dispose();
         }
-        
+
         if (object.material) {
             if (Array.isArray(object.material)) {
                 object.material.forEach(material => material.dispose());
@@ -1420,9 +1694,9 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 object.material.dispose();
             }
         }
-        
+
         delete objects[id];
-        
+
         if (selectedObject && selectedObject.data.id === id) {
             selectedObject = null;
             // Detach gizmo when selected object is deleted
@@ -1434,23 +1708,23 @@ export function createSceneManager(container, socket, callbacks = {}, background
             }
         }
     }
-    
+
     function onWindowResize(width, height) {
         if (!width || !height) {
             const containerRect = container.getBoundingClientRect();
             width = containerRect.width;
             height = containerRect.height;
         }
-        
+
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
         renderer.setSize(width, height, true);
         renderer.setPixelRatio(window.devicePixelRatio);
     }
-    
+
     function update() {
         controls.update();
-        
+
         // Update gizmo
         if (gizmo) {
             gizmo.update();
@@ -1481,7 +1755,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 animation.currentFrame = currentFrame;
             }
         }
-        
+
         // Update normal helpers if they exist
         if (renderSettings.showNormals) {
             for (const [id, helper] of Object.entries(normalHelpers)) {
@@ -1546,7 +1820,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
 
         renderer.render(scene, camera);
     }
-    
+
     function resetCamera() {
         setCamera(window.panoptiConfig.viewer.camera);
         controls.update();
@@ -1602,30 +1876,32 @@ export function createSceneManager(container, socket, callbacks = {}, background
     function lookAt(position, target) {
         setCamera({ position, target });
     }
-    
+
     function setBackgroundColor(colorHex) {
         scene.background = new THREE.Color(colorHex);
     }
-    
+
     function clearAllObjects() {
         Object.keys(objects).forEach(deleteObject);
         if (typeof onSceneObjectsChange === 'function') {
             onSceneObjectsChange();
         }
     }
-    
+
     function dispose() {
         clearAllObjects();
         clearInspectionHighlights();
         if (container.contains(inspectionDiv)) {
             container.removeChild(inspectionDiv);
         }
-        
+        // Remove hover listener
+        container.removeEventListener('pointermove', handlePointerMove);
+
         // Dispose gizmo
         if (gizmo) {
             gizmo.dispose();
         }
-        
+
         if (renderer) {
             renderer.dispose();
             if (container.contains(renderer.domElement)) {
@@ -1633,10 +1909,17 @@ export function createSceneManager(container, socket, callbacks = {}, background
             }
         }
     }
-    
+
     function applyRenderSettings(settings) {
         renderSettings = { ...settings };
-        
+
+        // Disable OrbitControls while in box inspect mode so dragging draws a selection
+        try {
+            controls.enabled = !renderSettings.boxInspectMode;
+        } catch (e) {
+            // controls may not be initialized yet
+        }
+
         for (const [id, objData] of Object.entries(objects)) {
             if (objData.type === 'mesh' || objData.type === 'animated_mesh') {
                 const { object, data } = objData;
@@ -1705,17 +1988,17 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 }
             }
         }
-        
+
         gridHelper.visible = renderSettings.showGrid;
         axesHelper.visible = renderSettings.showAxes;
         return selectedObject;
     }
-    
+
     // Get the currently selected object
     function getSelectedObject() {
         return selectedObject;
     }
-    
+
     // Get all objects in the scene
     function getAllObjects() {
         return Object.entries(objects).map(([id, obj]) => ({
@@ -1754,13 +2037,13 @@ export function createSceneManager(container, socket, callbacks = {}, background
             event_select_object(id);
         }
     }
-    
+
     // Toggle animated mesh playback method
     function toggleAnimatedMeshPlayback(objectId) {
         const objData = objects[objectId];
         if (objData && objData.type === 'animated_mesh') {
             const isCurrentlyPlaying = objData.animation.isPlaying;
-            
+
             // Update local animation state
             objData.animation.isPlaying = !isCurrentlyPlaying;
             if (objData.animation.isPlaying) {
@@ -1768,7 +2051,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             } else {
                 objData.animation.startTime = null;
             }
-            
+
             // Update data for UI
             objData.data.is_playing = objData.animation.isPlaying;
         }
@@ -1802,7 +2085,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
         renderer.render(scene, camera);
         const dataURL = renderer.domElement.toDataURL('image/png');
-        
+
         // Restore previous settings
         renderer.setClearColor(prevColor, prevAlpha);
         if (prevBackgroundColor) {
@@ -1824,7 +2107,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         if (window.viewerId) payload.viewer_id = window.viewerId;
         socket.emit('events.select_object', payload);
     }
-    
+
     return {
         update,
         onWindowResize,
