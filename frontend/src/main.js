@@ -59,6 +59,11 @@ function applyThemeVars(theme) {
     }
 }
 
+function resolveThemeBackground(theme) {
+    if (!theme) return '#0b1118';
+    return theme['dark-mode'] ? theme['background-color-dark'] : theme['background-color'];
+}
+
 const App = () => {
     
     // Global config:
@@ -74,7 +79,9 @@ const App = () => {
     const [isLoading, setIsLoading] = React.useState(true);
 
     // ThreeJS Viewer:
-    const [backgroundColor, setBackgroundColor] = React.useState('#f0f0f0');
+    const [backgroundColor, setBackgroundColor] = React.useState(() =>
+        resolveThemeBackground(window.panoptiConfig?.viewer?.theme)
+    );
     const [sceneObjects, setSceneObjects] = React.useState([]);
     const [selectedObject, setSelectedObject] = React.useState(null);
     const [renderSettings, setRenderSettings] = React.useState({
@@ -236,6 +243,7 @@ const App = () => {
         
         // Create SceneManager with config from injected data
         const injectedConfig = window.panoptiConfig || getFallbackDefaults();
+        const initialBackgroundColor = resolveThemeBackground(injectedConfig?.viewer?.theme);
         const SceneManager = createSceneManager(
             container,
             socketRef.current,
@@ -243,7 +251,7 @@ const App = () => {
                 onSelectObject: setSelectedObject,
                 onSceneObjectsChange: updateSceneObjectsList
             },
-            backgroundColor,
+            initialBackgroundColor,
             injectedConfig.viewer.camera,
         );
         sceneManagerRef.current = SceneManager;
@@ -327,7 +335,7 @@ const App = () => {
             if (sceneManagerRef.current) {
                 sceneManagerRef.current.onWindowResize();
             }
-        }, 310);
+        }, 160);
         
         return () => clearTimeout(resizeTimeout);
     }, [isPanelCollapsed]);
@@ -400,8 +408,8 @@ const App = () => {
         } else {
             setPanelTransitionClass('panel-expanding');
             setIsPanelCollapsed(false);
-            // Remove class after expand transition (300ms)
-            setTimeout(() => setPanelTransitionClass(''), 300);
+            // Remove class after expand transition
+            setTimeout(() => setPanelTransitionClass(''), 140);
         }
     };
     

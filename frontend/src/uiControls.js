@@ -157,18 +157,18 @@ export function ColorPickerControl({ control, handlers }) {
     React.createElement(
         'div',
         { className: 'color-picker-container' },
-        React.createElement(
-        'label',
-        { className: 'checkbox-label', onClick: () => setShow((v) => !v) },
-        control.name
-        ),
         React.createElement('div', {
         className: 'color-preview',
         style: {
             backgroundColor: `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`,
         },
         onClick: () => setShow((v) => !v),
-        })
+        }),
+        React.createElement(
+            'label',
+            { className: 'checkbox-label', onClick: () => setShow((v) => !v) },
+            control.name
+        )
     ),
     show &&
         React.createElement(

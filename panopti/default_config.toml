@@ -17,18 +17,18 @@ light-fill    = { type = "directional", position = [-20, 5, -10], target = [0, 0
 light-ambient = { type = "ambient", color = "#ffffff", intensity = 1.0 }
 
 [viewer.theme]
-primary-color = "#4361ee"
-primary-hover = "#3a56d4"
-secondary-color = "#3f37c9"
-background-color = "#f0f0f0"
-background-color-dark = "#2d3142"
-panel-bg = "#ffffff"
-text-color = "#333333"
-text-secondary = "#666666"
-border-color = "#e9ecef"
-success-color = "#38b000"
-success-hover = "#2d9900"
-dark-mode = false
+primary-color = "#18c37e"
+primary-hover = "#25d790"
+secondary-color = "#4aa8ff"
+background-color = "#f3f6fa"
+background-color-dark = "#0b1118"
+panel-bg = "#101822"
+text-color = "#e8eff8"
+text-secondary = "#99a9be"
+border-color = "#2a3647"
+success-color = "#20ca84"
+success-hover = "#2add95"
+dark-mode = true
 
 [viewer.camera]
 position = [5, 5, 5]

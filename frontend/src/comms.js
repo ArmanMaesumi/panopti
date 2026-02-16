@@ -28,7 +28,16 @@ export function initComms(sceneManagerRef, { setIsLoading, setControls, setConso
 
     socket.on('add_control', data => {
         setConnectionStatus('connected');
-        setControls && setControls(prev => [...prev.filter(c => c.id !== data.id), data]);
+        setControls && setControls(prev => {
+            const existingIndex = prev.findIndex(c => c.id === data.id);
+            if (existingIndex === -1) {
+                return [...prev, data];
+            }
+
+            const next = [...prev];
+            next[existingIndex] = { ...next[existingIndex], ...data };
+            return next;
+        });
     });
 
     socket.on('update_label', data => {
@@ -115,4 +124,3 @@ export function initComms(sceneManagerRef, { setIsLoading, setControls, setConso
 
     return socket;
 }
-
