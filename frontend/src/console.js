@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 
 const ConsoleWindow = ({
     consoleLines,
@@ -9,12 +9,14 @@ const ConsoleWindow = ({
     setConsoleSize,
     toggleConsole,
     showConsole,
-    consoleRef
+    consoleRef,
+    onSubmitCommand
 }) => {
     const resizeObserverRef = useRef(null);
     const windowRef = useRef(null);
     const isDragging = useRef(false);
     const dragOffset = useRef({ x: 0, y: 0 });
+    const [command, setCommand] = useState('');
     const MIN_WIDTH = 300;
     const MIN_HEIGHT = 150;
 
@@ -40,6 +42,15 @@ const ConsoleWindow = ({
     };
 
     const handleClearConsole = () => setConsoleLines([]);
+
+    const handleSubmitCommand = (e) => {
+        e.preventDefault();
+        if (!onSubmitCommand) return;
+        const trimmed = command.trim();
+        if (!trimmed) return;
+        onSubmitCommand(command);
+        setCommand('');
+    };
 
     // Constrain position to screen boundaries
     const constrainPosition = useCallback((x, y) => {
@@ -173,7 +184,26 @@ const ConsoleWindow = ({
                 )
             ),
         ),
-        React.createElement('pre', { className: 'console-content', ref: consoleRef }, renderConsoleLines())
+        React.createElement('pre', { className: 'console-content', ref: consoleRef }, renderConsoleLines()),
+        React.createElement(
+            'form',
+            { className: 'console-input-row', onSubmit: handleSubmitCommand },
+            React.createElement('span', { className: 'console-prompt' }, '>>>'),
+            React.createElement('input', {
+                className: 'console-input',
+                type: 'text',
+                value: command,
+                onChange: (e) => setCommand(e.target.value),
+                placeholder: 'Run Python in script scope...',
+                autoComplete: 'off',
+                spellCheck: false,
+            }),
+            React.createElement(
+                'button',
+                { className: 'console-submit', type: 'submit', title: 'Run command' },
+                'Run'
+            )
+        )
     );
 };
 

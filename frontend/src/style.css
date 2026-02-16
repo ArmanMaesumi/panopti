@@ -905,15 +905,93 @@ button:disabled {
     right: 8px;
     top: 42%;
     z-index: 20;
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    border: 1px solid #2e4156;
-    background: #111b29;
-    color: #9eb3c8;
-    display: grid;
-    place-items: center;
-    padding: 0;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 24px rgba(24,28,36,0.18);
+}
+.console-header {
+    background: #23272f9b;
+    color: #fff;
+    padding: 4px 8px;
+    cursor: move;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    border-radius: 4px 4px 0 0;
+}
+.console-header-buttons {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.console-content {
+    flex-grow: 1;
+    padding: 4px 8px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: #d8d8d8;
+    margin: 0;
+    word-wrap: break-word;
+    font-size: 0.85rem;
+}
+
+.console-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-top: 1px solid #3a4252;
+    padding: 6px 8px;
+    background: #1c212b;
+}
+
+.console-prompt {
+    color: #87e6c9;
+    font-size: 0.8rem;
+    font-family: inherit;
+    user-select: none;
+}
+
+.console-input {
+    flex: 1;
+    min-width: 0;
+    background: #0f141d;
+    color: #f1f1f1;
+    border: 1px solid #4a5367;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 0.8rem;
+}
+
+.console-input:focus {
+    outline: none;
+    border-color: #74c0fc;
+}
+
+.console-submit {
+    all: unset;
+    border: 1px solid #4a5367;
+    border-radius: 4px;
+    color: #d8d8d8;
+    cursor: pointer;
+    padding: 5px 8px;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.console-submit:hover {
+    border-color: #74c0fc;
+    color: #ffffff;
+}
+
+/* Console line colors */
+.console-line {
+    /* display: block; */
+}
+
+.console-red {
+    color: #ff6b6b;
 }
 
 .floating-ui-panel-caret:hover {
@@ -1275,45 +1353,10 @@ button:disabled {
     }
 }
 
-@media (max-width: 720px) {
-    .ui-panel {
-        height: 46%;
-    }
-
-    .scene-toolbar,
-    .render-toolbar {
-        padding: 4px;
-        gap: 3px;
-    }
-
-    .toolbar-button {
-        width: 30px;
-        height: 30px;
-    }
-
-    .layers-panel {
-        width: min(236px, calc(100% - 16px));
-    }
-
-    .transform-panel {
-        max-width: calc(100% - 16px);
-    }
-
-    .vector-fields {
-        gap: 5px;
-    }
-
-    .slider-value {
-        width: 52px;
-    }
-
-    .status-indicator {
-        min-width: 86px;
-        padding: 4px 6px;
-    }
-
-    .info-details {
-        gap: 4px;
-        font-size: 0.68rem;
-    }
+.ms-filled {
+    font-variation-settings:
+    'FILL' 1,
+    'wght' 300,
+    'GRAD' 0,
+    'opsz' 24
 }

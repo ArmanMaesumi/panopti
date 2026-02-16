@@ -514,6 +514,21 @@ const App = () => {
 
     const toggleConsole = () => setShowConsole(prev => !prev);
 
+    const runConsoleCommand = (command) => {
+        if (!socketRef.current) return;
+        const trimmed = command.trim();
+        if (!trimmed) return;
+
+        setConsoleLines(prev => [
+            ...prev,
+            { segments: [{ text: `>>> ${command}\n`, color: 'bright-cyan' }] }
+        ]);
+
+        const payload = { command };
+        if (window.viewerId) payload.viewer_id = window.viewerId;
+        socketRef.current.emit('console_command', payload);
+    };
+
     const toggleWidget = (widgetId) => {
         setWidgets(prev => prev.map(widget => 
             widget.id === widgetId 
@@ -749,6 +764,7 @@ const App = () => {
                 toggleConsole,
                 showConsole,
                 consoleRef,
+                onSubmitCommand: runConsoleCommand,
             }),
             // Render widget panels
             widgets.map(widget => 

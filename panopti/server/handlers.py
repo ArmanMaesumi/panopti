@@ -62,8 +62,7 @@ def register_handlers(app) -> None:
         | _OBJECT_DELETES
         | _CONTROL_DELETES
         | _EVENTS
-        | {"update_object", "update_label", "download_file", "console_output", "camera_info", "selected_object", "screenshot", "set_camera", "viewer_heartbeat", "client_heartbeat"}
+        | {"update_object", "update_label", "download_file", "console_output", "console_command", "camera_info", "selected_object", "screenshot", "set_camera", "viewer_heartbeat", "client_heartbeat"}
     ):
         socketio.on(event)(create_event_handler(event, socketio))
-
 

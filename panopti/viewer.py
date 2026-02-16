@@ -1,12 +1,15 @@
 # panopti/viewer.py
 import threading
 import atexit
+import contextlib
+import inspect
 import numpy as np
 import time
 import uuid
 from typing import Dict, Any, Callable, Optional, Tuple, List, Union
 import os
 import sys
+import traceback
 import eventlet
 from eventlet import event
 import io
@@ -42,12 +45,16 @@ class BaseViewer:
         self._selected_object_thread = threading.Event()
         self._selected_object = None
         self._print_buffer = io.StringIO()  # Always present from the start
+        self._capture_prints_enabled = False
+        self._console_scope_globals = None
+        self._console_scope_locals = None
 
     def capture_prints(self, buffer=None, capture_stderr=False):
         """Mirrors prints in the viewer."""
         from .utils.print_capture import capture_prints as cap
         # Always use the persistent buffer
         buf = cap(buffer=self._print_buffer, capture_stderr=capture_stderr, callback=self._emit_console_callback())
+        self._capture_prints_enabled = True
         return buf
 
     def _emit_console_callback(self):
@@ -67,6 +74,32 @@ class BaseViewer:
         text += end
         segments = [{'text': text, 'color': color}]
         self.socket_manager.emit_console_output(segments)
+
+    def set_console_scope(self, globals_dict: Optional[Dict[str, Any]] = None,
+                          locals_dict: Optional[Dict[str, Any]] = None) -> None:
+        """Set the namespace used by frontend console command evaluation."""
+        if globals_dict is None:
+            return
+        self._console_scope_globals = globals_dict
+        self._console_scope_locals = locals_dict if locals_dict is not None else globals_dict
+
+    def _resolve_console_scope(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Return globals/locals used for console command evaluation."""
+        globals_dict = self._console_scope_globals
+        locals_dict = self._console_scope_locals
+
+        if globals_dict is None:
+            main_mod = sys.modules.get('__main__')
+            globals_dict = getattr(main_mod, '__dict__', {})
+            locals_dict = globals_dict
+
+        if locals_dict is None:
+            locals_dict = globals_dict
+
+        if '__builtins__' not in globals_dict:
+            globals_dict['__builtins__'] = __builtins__
+
+        return globals_dict, locals_dict
 
     def hold(self):
         """Keep the script alive"""
@@ -409,6 +442,7 @@ class ViewerClient(BaseViewer):
         self.client = RemoteSocketIO(server_url, viewer_id)
         self.client.viewer = self  # Set the viewer reference
         self.client.connect()
+        self._console_exec_lock = threading.Lock()
 
         self.headless_browser = None
         if headless:
@@ -422,6 +456,7 @@ class ViewerClient(BaseViewer):
         self.client.on('ui_event_response', self.handle_ui_event_from_server)
         self.client.on('update_object', self.handle_update_object)
         self.client.on('restart_script', self.handle_restart_script)
+        self.client.on('console_command', self.handle_console_command)
 
         # State requests:
         self.client.on('request_state_from_client', self.handle_request_state)
@@ -489,6 +524,70 @@ class ViewerClient(BaseViewer):
         if data.get('viewer_id') != self.viewer_id:
             return
         self.restart()
+
+    def _emit_console_text(self, text: str, color: Optional[str] = None) -> None:
+        if not text:
+            return
+        from .utils.print_capture import split_text_to_segments
+        segments = split_text_to_segments(text)
+        if color is not None:
+            for segment in segments:
+                if not segment.get('color'):
+                    segment['color'] = color
+        self.socket_manager.emit_console_output(segments)
+
+    def _execute_console_command(self, command: str) -> None:
+        command = str(command or '').rstrip('\n')
+        if not command.strip():
+            return
+
+        globals_dict, locals_dict = self._resolve_console_scope()
+        capture_output = not self._capture_prints_enabled
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        stdout_ctx = contextlib.redirect_stdout(stdout_buffer) if capture_output else contextlib.nullcontext()
+        stderr_ctx = contextlib.redirect_stderr(stderr_buffer) if capture_output else contextlib.nullcontext()
+
+        with self._console_exec_lock:
+            try:
+                with stdout_ctx, stderr_ctx:
+                    try:
+                        compiled = compile(command, '<panopti-console>', 'eval')
+                    except SyntaxError:
+                        compiled = compile(command, '<panopti-console>', 'exec')
+                        exec(compiled, globals_dict, locals_dict)
+                    else:
+                        result = eval(compiled, globals_dict, locals_dict)
+                        if result is not None:
+                            self._emit_console_text(f"{result!r}\n")
+            except BaseException:
+                self._emit_console_text(traceback.format_exc(), color='red')
+            finally:
+                if capture_output:
+                    stdout_text = stdout_buffer.getvalue()
+                    stderr_text = stderr_buffer.getvalue()
+                    if stdout_text:
+                        self._emit_console_text(stdout_text)
+                    if stderr_text:
+                        self._emit_console_text(stderr_text, color='red')
+
+    def handle_console_command(self, data):
+        if not isinstance(data, dict):
+            return
+        if data.get('viewer_id') != self.viewer_id:
+            return
+        self._execute_console_command(data.get('command', ''))
+
+    def hold(self):
+        frame = inspect.currentframe()
+        caller = frame.f_back if frame else None
+        try:
+            if caller:
+                self.set_console_scope(caller.f_globals, caller.f_locals)
+        finally:
+            del frame
+            del caller
+        super().hold()
 
     # --- Requesting state: ---
     def handle_request_state(self, data=None):
@@ -703,7 +802,19 @@ def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = F
         headless (bool, optional): Whether to run in headless mode. Defaults to False.
         viewport (Tuple[int, int], optional): Width and height of the headless viewport. Defaults to (1280, 720) if headless=True.
     """
-    return ViewerClient(server_url, viewer_id, headless=headless, viewport=viewport)
+    viewer = ViewerClient(server_url, viewer_id, headless=headless, viewport=viewport)
+
+    # Default console evaluation scope to the caller's namespace.
+    frame = inspect.currentframe()
+    caller = frame.f_back if frame else None
+    try:
+        if caller:
+            viewer.set_console_scope(caller.f_globals, caller.f_locals)
+    finally:
+        del frame
+        del caller
+
+    return viewer
 
 
 def start_server(host: str = 'localhost', port: int = 8080, debug: bool = False, config_path: str = None):
