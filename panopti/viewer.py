@@ -625,20 +625,7 @@ class ViewerClient(BaseViewer):
 
     def _emit_completion_list(self, completions: List[str]) -> None:
         if not completions:
-            self._emit_console_text("(no completions)\n", color='yellow')
             return
-        chunk_size = 6
-        tabs = '\t' * 3
-        lines = []
-        # for i in range(len(completions)):
-        #     if i % chunk_size != 0:
-        #         lines.append(tabs + completions[i])
-        #     else:
-        #         lines.append(completions[i])
-        #     if i % chunk_size == chunk_size - 1:
-        #         lines.append("\n")
-        # self._emit_console_text("".join(lines) + "\n")
-        # For now just do a comma separated list:
         self._emit_console_text(", ".join(completions) + "\n")
 
     def _emit_console_meta(self) -> None:
