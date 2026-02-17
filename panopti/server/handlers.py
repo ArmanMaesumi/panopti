@@ -13,7 +13,7 @@ _OBJECT_DELETES = {"delete_object"}
 _CONTROL_DELETES = {"delete_control"}
 _VIEWER_META = {"viewer_meta"}
 _VIEWER_SESSION_START = {"viewer_session_started"}
-_EVENTS = {"events.camera", "events.inspect", "events.select_object", "events.gizmo"}
+_EVENTS = {"events.camera", "events.inspect", "events.select_object", "events.gizmo", "events.selection"}
 
 def _update_viewer_state(event_type: str, data: Dict[str, Any]) -> None:
     """Update stored viewer state depending on the event type."""
@@ -85,6 +85,7 @@ def register_handlers(app) -> None:
             "camera_info",
             "selected_object",
             "screenshot",
+            "selection_info",
             "set_camera",
             "viewer_heartbeat",
             "client_heartbeat",

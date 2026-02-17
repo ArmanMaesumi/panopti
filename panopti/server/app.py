@@ -184,6 +184,12 @@ def create_app(config_path: str = None, debug: bool = False):
         viewer_id = data.get('viewer_id')
         socketio.emit('request_screenshot', data or {}, room=viewer_id)
 
+    @socketio.on('request_selection_info')
+    def handle_request_selection_info(data):
+        _handle_missing_viewer_id(data)
+        viewer_id = data.get('viewer_id')
+        socketio.emit('request_selection_info', data or {}, room=viewer_id)
+
     # General function that lets the client request simple state information from the frontend
     @socketio.on('relay_state_request')
     def handle_relay_state_request(data):
@@ -221,4 +227,3 @@ def run_standalone_server(host='localhost', port=8080, debug=False, config_path:
     socketio = app.config['SOCKETIO']
     print(f"Starting standalone server at http://{host}:{port}")
     socketio.run(app, host=host, port=port, debug=debug, use_reloader=False)
-

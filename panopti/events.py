@@ -48,6 +48,24 @@ class InspectInfo:
     inspect_result: Union[MeshInspectResult, PointCloudInspectResult]
 
 @dataclass
+class MeshSelectionResult:
+    """Selection result data for mesh objects."""
+    face_indices: np.ndarray
+    vertex_indices: np.ndarray
+
+@dataclass
+class PointCloudSelectionResult:
+    """Selection result data for point cloud objects."""
+    point_indices: np.ndarray
+
+@dataclass
+class SelectionInfo:
+    """Selection information returned by selection events."""
+    object_name: str
+    object_type: str
+    selection_result: Union[MeshSelectionResult, PointCloudSelectionResult]
+
+@dataclass
 class GizmoInfo:
     """Gizmo transformation information."""
     object_name: str
@@ -120,6 +138,25 @@ def _dict_to_gizmo_info(data: dict) -> GizmoInfo:
         prev_trans=prev_trans
     )
 
+def _dict_to_selection_info(data: dict) -> SelectionInfo:
+    """Convert dictionary to SelectionInfo dataclass."""
+    result_data = data.get('selection_result', {})
+    object_type = data.get('object_type')
+    if object_type in ['mesh', 'animated_mesh']:
+        selection_result = MeshSelectionResult(
+            face_indices=np.asarray(result_data.get('face_indices', []), dtype=np.int32),
+            vertex_indices=np.asarray(result_data.get('vertex_indices', []), dtype=np.int32)
+        )
+    else:
+        selection_result = PointCloudSelectionResult(
+            point_indices=np.asarray(result_data.get('point_indices', []), dtype=np.int32)
+        )
+    return SelectionInfo(
+        object_name=data.get('object_name'),
+        object_type=object_type,
+        selection_result=selection_result
+    )
+
 class EventDispatcher:
     """Event dispatcher used for viewer callbacks."""
 
@@ -127,7 +164,8 @@ class EventDispatcher:
         self.viewer = viewer
         self._callbacks: Dict[str, List[Callable]] = {
             'camera': [],
-            'inspect': []
+            'inspect': [],
+            'selection': []
         }
         self._throttle_timestamps: Dict[str, float] = {}
 
@@ -222,6 +260,29 @@ class EventDispatcher:
         """
         def decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
             self._callbacks.setdefault('inspect', []).append(func)
+            return func
+        return decorator
+
+    def selection(self) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """The `selection` event is triggered when a selection tool interaction completes.
+        Example usage:
+        ```python
+        @viewer.events.selection()
+        def selection_event(viewer, selection_info):
+            print(f"User selected a {selection_info.object_type} object.")
+            if selection_info.object_type == 'mesh':
+                print('Selected face indices: ', selection_info.selection_result.face_indices)
+        ```
+        `selection_info` is an `SelectionInfo` object with the following attributes:
+
+        | attribute        | meaning                                                          | type   |
+        |------------------|------------------------------------------------------------------|--------|
+        | object_name      | `name` attribute of selected object                              | str    |
+        | object_type      | type of Panopti object selected (e.g., `'mesh'`, `'points'`)     | str    |
+        | selection_result | geometry-specific data at the pick point:<br><br>**Mesh**: `MeshSelectionResult` holding `face_indices` and `vertex_indices`<br><br>**PointCloud**: `PointCloudSelectionResult` holding `point_indices` | Union[MeshSelectionResult, PointCloudSelectionResult]   |
+        """
+        def decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
+            self._callbacks.setdefault('selection', []).append(func)
             return func
         return decorator
     
@@ -329,6 +390,8 @@ class EventDispatcher:
                     args = (_dict_to_camera_info(args[0]),) + args[1:]
                 elif event == 'inspect' and args and isinstance(args[0], dict):
                     args = (_dict_to_inspect_info(args[0]),) + args[1:]
+                elif event == 'selection' and args and isinstance(args[0], dict):
+                    args = (_dict_to_selection_info(args[0]),) + args[1:]
                 elif event == 'gizmo' and args and isinstance(args[0], dict):
                     args = (_dict_to_gizmo_info(args[0]),) + args[1:]
                 

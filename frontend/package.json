@@ -9,6 +9,7 @@
     "build:debug": "vite build --mode debug"
   },
   "dependencies": {
+    "@msgpack/msgpack": "^2.8.0",
     "@uiw/react-color": "^2.6.0",
     "buffer": "^6.0.3",
     "color-convert": "^3.1.0",
@@ -21,7 +22,7 @@
     "socket.io": "^4.4.1",
     "socket.io-client": "^4.4.1",
     "three": "^0.160.0",
-    "@msgpack/msgpack": "^2.8.0"
+    "three-mesh-bvh": "^0.9.8"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.2",

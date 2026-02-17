@@ -117,6 +117,10 @@ export function initComms(
             const height = data && data.height !== undefined ? data.height : undefined;
             const screenshot = sceneManagerRef.current.getScreenshot(data.bg_color, width, height);
             return { data: screenshot };
+        },
+        request_selection_info: () => {
+            if (!sceneManagerRef.current) return { data: null };
+            return { data: sceneManagerRef.current.getSelectionInfo() };
         }
     };
     Object.entries(queryHandlers).forEach(([reqEvent, handler]) => {

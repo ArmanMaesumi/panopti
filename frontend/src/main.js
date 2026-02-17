@@ -103,6 +103,13 @@ const App = () => {
         inspectMode: false,
         powerPreference: 'default'
     });
+    const [selectionTool, setSelectionTool] = React.useState({
+        enabled: false,
+        mode: 'box',
+        visibleOnly: true,
+        brushRadius: 0.1,
+        bucketSelectComponent: true
+    });
     const [gizmoEnabled, setGizmoEnabled] = React.useState(false);
     const [lightSettings, setLightSettings] = React.useState({
         ambientColor: '#ffffff',
@@ -369,6 +376,17 @@ const App = () => {
             sceneManagerRef.current.applyRenderSettings(renderSettings);
         }
     }, [renderSettings]);
+
+    React.useEffect(() => {
+        if (!sceneManagerRef.current) return;
+        sceneManagerRef.current.setSelectionTool(selectionTool);
+    }, [
+        selectionTool.enabled,
+        selectionTool.mode,
+        selectionTool.visibleOnly,
+        selectionTool.brushRadius,
+        selectionTool.bucketSelectComponent
+    ]);
     
     React.useEffect(() => {
         if (sceneManagerRef.current) {
@@ -626,6 +644,18 @@ const App = () => {
 
     const updateLightSetting = (setting, value) =>
         updateLight(sceneManagerRef, setLightSettings, setting, value);
+
+    const toggleSelectionTool = () => {
+        setSelectionTool(prev => ({ ...prev, enabled: !prev.enabled }));
+    };
+
+    const setSelectionMode = (mode) => {
+        setSelectionTool(prev => ({ ...prev, mode }));
+    };
+
+    const updateSelectionOption = (key, value) => {
+        setSelectionTool(prev => ({ ...prev, [key]: value }));
+    };
     
     const toggleGizmo = () => {
         const newEnabled = !gizmoEnabled;
@@ -682,7 +712,18 @@ const App = () => {
     
     // Create Render Toolbar
     const renderRenderToolbar = () =>
-        renderToolbar(renderSettings, toggleRenderSetting, captureCurrentView, renderToClipboard, gizmoEnabled, toggleGizmo);
+        renderToolbar(
+            renderSettings,
+            toggleRenderSetting,
+            captureCurrentView,
+            renderToClipboard,
+            gizmoEnabled,
+            toggleGizmo,
+            selectionTool,
+            toggleSelectionTool,
+            setSelectionMode,
+            updateSelectionOption
+        );
     
     // Create Lighting Toolbar
     const renderLightingToolbar = () =>

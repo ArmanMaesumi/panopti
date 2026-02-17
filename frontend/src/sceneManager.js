@@ -7,6 +7,7 @@ import { debounce, throttle } from './utils.js';
 import * as CONSTANTS from './constants.js';
 import { createMaterial, updateMaterial } from './materials.js';
 import { Gizmo } from './gizmo.js';
+import { createSelectionHelpers, SELECTION_MODE_DEFAULTS } from './selectionTools.js';
 
 function bufferToTypedArray(buf, dtype) {
     // msgpack returns a Uint8Array for binary payloads. When constructing
@@ -181,6 +182,29 @@ function expandVerticesForNonIndexed(vertices, faces) {
     return expanded;
 }
 
+function isFromUIPanelTarget(target) {
+    return Boolean(
+        target &&
+        (
+            target.closest('.console-window') ||
+            target.closest('.layers-panel') ||
+            target.closest('.transform-panel') ||
+            target.closest('.ui-panel') ||
+            target.closest('.scene-toolbar') ||
+            target.closest('.render-toolbar') ||
+            target.closest('.lighting-toolbar') ||
+            target.closest('.info-bar') ||
+            target.closest('.selection-tool-menu')
+        )
+    );
+}
+
+function isTextInputElement(target) {
+    if (!target || !(target instanceof Element)) return false;
+    if (target.closest('input, textarea, select, [contenteditable="true"]')) return true;
+    return false;
+}
+
 // Main Three.js scene setup:
 export function createSceneManager(container, socket, callbacks = {}, backgroundColor = '#f0f0f0', cameraConfig = null, setShowWidget) {
     const { onSelectObject, onSceneObjectsChange } = callbacks;
@@ -277,6 +301,109 @@ export function createSceneManager(container, socket, callbacks = {}, background
     const objects = {};
     
     let selectedObject = null;
+    let selectionTool = { ...SELECTION_MODE_DEFAULTS };
+    const selectionByObject = {};
+    let lastSelectionInfo = null;
+    const selectionKeyState = { add: false, subtract: false };
+    const selectionInteraction = {
+        active: false,
+        pointerId: null,
+        mode: null,
+        objectId: null,
+        start: [0, 0],
+        current: [0, 0],
+        points: [],
+        stagedSelection: null,
+        initialSelection: null,
+        previewApplied: false,
+        controlsEnabledBefore: true
+    };
+    const brushCursor = {
+        valid: false,
+        x: 0,
+        y: 0
+    };
+
+    const selectionHelpers = createSelectionHelpers({
+        container,
+        getCamera: () => camera,
+        raycaster,
+        mouse
+    });
+
+    const selectionCanvas = document.createElement('canvas');
+    selectionCanvas.className = 'selection-overlay-canvas';
+    selectionCanvas.style.position = 'absolute';
+    selectionCanvas.style.inset = '0';
+    selectionCanvas.style.pointerEvents = 'none';
+    selectionCanvas.style.zIndex = '11';
+    container.appendChild(selectionCanvas);
+    const selectionCtx = selectionCanvas.getContext('2d');
+
+    function resizeSelectionCanvas() {
+        const rect = container.getBoundingClientRect();
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        selectionCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        selectionCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        selectionCanvas.style.width = `${rect.width}px`;
+        selectionCanvas.style.height = `${rect.height}px`;
+        selectionCtx.setTransform(1, 0, 0, 1, 0, 0);
+        selectionCtx.scale(dpr, dpr);
+    }
+
+    function clearSelectionOverlayCanvas() {
+        const rect = container.getBoundingClientRect();
+        selectionCtx.clearRect(0, 0, rect.width, rect.height);
+    }
+
+    function drawSelectionOverlayCanvas() {
+        clearSelectionOverlayCanvas();
+        const showBrushCursor = selectionTool.enabled && selectionTool.mode === 'brush' && brushCursor.valid;
+        if (!selectionInteraction.active && !showBrushCursor) return;
+
+        const mode = selectionInteraction.active ? selectionInteraction.mode : 'brush';
+        selectionCtx.save();
+        selectionCtx.lineWidth = 1.5;
+        selectionCtx.strokeStyle = '#4aa8ff';
+        selectionCtx.fillStyle = 'rgba(74, 168, 255, 0.15)';
+        selectionCtx.setLineDash([4, 3]);
+
+        if (mode === 'box') {
+            const [sx, sy] = selectionInteraction.start;
+            const [cx, cy] = selectionInteraction.current;
+            const x = Math.min(sx, cx);
+            const y = Math.min(sy, cy);
+            const w = Math.abs(cx - sx);
+            const h = Math.abs(cy - sy);
+            selectionCtx.fillRect(x, y, w, h);
+            selectionCtx.strokeRect(x, y, w, h);
+        } else if (mode === 'lasso') {
+            const pts = selectionInteraction.points;
+            if (pts.length >= 2) {
+                selectionCtx.beginPath();
+                selectionCtx.moveTo(pts[0][0], pts[0][1]);
+                for (let i = 1; i < pts.length; i += 1) {
+                    selectionCtx.lineTo(pts[i][0], pts[i][1]);
+                }
+                selectionCtx.lineTo(selectionInteraction.current[0], selectionInteraction.current[1]);
+                selectionCtx.closePath();
+                selectionCtx.fill();
+                selectionCtx.stroke();
+            }
+        } else if (mode === 'brush') {
+            const cx = selectionInteraction.active ? selectionInteraction.current[0] : brushCursor.x;
+            const cy = selectionInteraction.active ? selectionInteraction.current[1] : brushCursor.y;
+            const radiusPx = getBrushRadiusPixels();
+            selectionCtx.beginPath();
+            selectionCtx.arc(cx, cy, radiusPx, 0, Math.PI * 2);
+            selectionCtx.fill();
+            selectionCtx.stroke();
+        }
+
+        selectionCtx.restore();
+    }
+
+    resizeSelectionCanvas();
     
     // Create inspection text overlay
     const inspectionDiv = document.createElement('div');
@@ -354,20 +481,689 @@ export function createSceneManager(container, socket, callbacks = {}, background
         const u = 1 - v - w;
         return { u, v, w };
     }
+
+    function getActiveSelectableObjectData() {
+        if (!selectedObject || !selectedObject.data || !selectedObject.data.id) return null;
+        const objData = objects[selectedObject.data.id];
+        if (!objData) return null;
+        if (objData.type !== 'mesh' && objData.type !== 'points') return null;
+        if (!objData.object.visible) return null;
+        return objData;
+    }
+
+    function getBrushRadiusPixels(radiusSetting = selectionTool.brushRadius) {
+        return selectionHelpers.getBrushRadiusPixels(radiusSetting);
+    }
+
+    function getGeometryFaceCount(geometry) {
+        return selectionHelpers.getGeometryFaceCount(geometry);
+    }
+
+    function getGeometryFaceVertexIndices(geometry, faceIndex) {
+        return selectionHelpers.getGeometryFaceVertexIndices(geometry, faceIndex);
+    }
+
+    function getTopologyFaceVertexIndices(objData, faceIndex) {
+        return selectionHelpers.getTopologyFaceVertexIndices(objData, faceIndex);
+    }
+
+    function getDataFaceVertexIndices(objData, faceIndex) {
+        return selectionHelpers.getDataFaceVertexIndices(objData, faceIndex);
+    }
+
+    function ensureMeshBVH(objData) {
+        return selectionHelpers.ensureMeshBVH(objData);
+    }
+
+    function invalidateMeshBVH(objData) {
+        return selectionHelpers.invalidateMeshBVH(objData);
+    }
+
+    function raycastObjectFromLocal(objData, localX, localY, options = {}) {
+        return selectionHelpers.raycastObjectFromLocal(objData, localX, localY, options);
+    }
+
+    function raycastObjectFromClient(objData, clientX, clientY, options = {}) {
+        return selectionHelpers.raycastObjectFromClient(objData, clientX, clientY, options);
+    }
+
+    function collectAllMeshSelection(objData) {
+        return selectionHelpers.collectAllMeshSelection(objData);
+    }
+
+    function collectAllPointsSelection(objData) {
+        return selectionHelpers.collectAllPointsSelection(objData);
+    }
+
+    function collectRegionSelectionMesh(objData, region, visibleOnly = true) {
+        return selectionHelpers.collectRegionSelectionMesh(objData, region, visibleOnly);
+    }
+
+    function collectRegionSelectionPoints(objData, region, visibleOnly = true) {
+        return selectionHelpers.collectRegionSelectionPoints(objData, region, visibleOnly);
+    }
+
+    function collectBrushSelection(objData, clientX, clientY, radius, targetSelection) {
+        return selectionHelpers.collectBrushSelection(objData, clientX, clientY, radius, targetSelection);
+    }
+
+    function collectBucketSelection(objData, clientX, clientY) {
+        return selectionHelpers.collectBucketSelection(
+            objData,
+            clientX,
+            clientY,
+            !!selectionTool.bucketSelectComponent
+        );
+    }
+
+    function ensureObjectSelectionState(objectId, objectType) {
+        if (!selectionByObject[objectId]) {
+            selectionByObject[objectId] = {
+                objectType,
+                faceIndices: new Set(),
+                vertexIndices: new Set(),
+                pointIndices: new Set(),
+                overlay: null
+            };
+        }
+        return selectionByObject[objectId];
+    }
+
+    function disposeObjectSelectionOverlay(objectId) {
+        const state = selectionByObject[objectId];
+        if (!state || !state.overlay) return;
+        const overlay = state.overlay;
+        if (overlay.parent) {
+            overlay.parent.remove(overlay);
+        }
+        if (overlay.geometry) {
+            overlay.geometry.dispose();
+        }
+        if (overlay.material) {
+            if (Array.isArray(overlay.material)) {
+                overlay.material.forEach(mat => mat.dispose());
+            } else {
+                overlay.material.dispose();
+            }
+        }
+        state.overlay = null;
+    }
+
+    function refreshObjectSelectionOverlay(objectId) {
+        const objData = objects[objectId];
+        if (!objData) return;
+        const state = ensureObjectSelectionState(objectId, objData.type);
+
+        disposeObjectSelectionOverlay(objectId);
+
+        if (objData.type === 'mesh') {
+            const selectedFaces = Array.from(state.faceIndices).sort((a, b) => a - b);
+            if (!selectedFaces.length) return;
+
+            const sourceGeometry = objData.object.geometry;
+            const posAttr = sourceGeometry.getAttribute('position');
+            if (!posAttr) return;
+
+            const positions = [];
+            const indices = [];
+            selectedFaces.forEach((faceIndex, i) => {
+                const [a, b, c] = getGeometryFaceVertexIndices(sourceGeometry, faceIndex);
+                const base = i * 3;
+                positions.push(
+                    posAttr.array[a * 3], posAttr.array[a * 3 + 1], posAttr.array[a * 3 + 2],
+                    posAttr.array[b * 3], posAttr.array[b * 3 + 1], posAttr.array[b * 3 + 2],
+                    posAttr.array[c * 3], posAttr.array[c * 3 + 1], posAttr.array[c * 3 + 2]
+                );
+                indices.push(base, base + 1, base + 2);
+            });
+
+            const overlayGeometry = new THREE.BufferGeometry();
+            overlayGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+            overlayGeometry.setIndex(indices);
+            const overlayMaterial = new THREE.MeshBasicMaterial({
+                color: 0x22d3ee,
+                transparent: true,
+                opacity: 0.35,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            const overlayMesh = new THREE.Mesh(overlayGeometry, overlayMaterial);
+            overlayMesh.renderOrder = 999;
+            objData.object.add(overlayMesh);
+            state.overlay = overlayMesh;
+            return;
+        }
+
+        if (objData.type === 'points') {
+            const selectedPoints = Array.from(state.pointIndices).sort((a, b) => a - b);
+            if (!selectedPoints.length) return;
+
+            const positions = [];
+            const scale = objData.data?.scale || [1, 1, 1];
+            selectedPoints.forEach(pointIndex => {
+                const point = objData.data.points[pointIndex];
+                if (!point) return;
+                positions.push(
+                    point[0] * scale[0],
+                    point[1] * scale[1],
+                    point[2] * scale[2]
+                );
+            });
+            if (!positions.length) return;
+
+            const overlayGeometry = new THREE.BufferGeometry();
+            overlayGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+            const overlayMaterial = new THREE.PointsMaterial({
+                color: 0x22d3ee,
+                size: Math.max(0.02, (objData.data.size || 0.01) * 2.0),
+                transparent: true,
+                opacity: 0.95,
+                depthWrite: false
+            });
+            const overlayPoints = new THREE.Points(overlayGeometry, overlayMaterial);
+            overlayPoints.renderOrder = 999;
+            objData.object.add(overlayPoints);
+            state.overlay = overlayPoints;
+        }
+    }
+
+    function getSelectionOperation() {
+        if (selectionKeyState.add && !selectionKeyState.subtract) return 'add';
+        if (selectionKeyState.subtract && !selectionKeyState.add) return 'subtract';
+        return 'replace';
+    }
+
+    function cloneSelectionSnapshot(objData) {
+        const state = ensureObjectSelectionState(objData.data.id, objData.type);
+        if (objData.type === 'mesh') {
+            return {
+                faceIndices: new Set(state.faceIndices),
+                vertexIndices: new Set(state.vertexIndices)
+            };
+        }
+        return {
+            pointIndices: new Set(state.pointIndices)
+        };
+    }
+
+    function selectionResultFromSnapshot(objData, snapshot) {
+        if (objData.type === 'mesh') {
+            return {
+                faceIndices: Array.from(snapshot.faceIndices || []),
+                vertexIndices: Array.from(snapshot.vertexIndices || [])
+            };
+        }
+        return {
+            pointIndices: Array.from(snapshot.pointIndices || [])
+        };
+    }
+
+    function buildBrushPreviewResult(objData, operation) {
+        const staged = selectionInteraction.stagedSelection || {
+            faceIndices: new Set(),
+            vertexIndices: new Set(),
+            pointIndices: new Set()
+        };
+        const initial = selectionInteraction.initialSelection || cloneSelectionSnapshot(objData);
+
+        if (objData.type === 'mesh') {
+            let nextFaces;
+            if (operation === 'replace') {
+                nextFaces = new Set(staged.faceIndices);
+            } else if (operation === 'add') {
+                nextFaces = new Set(initial.faceIndices);
+                staged.faceIndices.forEach(faceIndex => nextFaces.add(faceIndex));
+            } else {
+                nextFaces = new Set(initial.faceIndices);
+                staged.faceIndices.forEach(faceIndex => nextFaces.delete(faceIndex));
+            }
+
+            const nextVerts = new Set();
+            nextFaces.forEach(faceIndex => {
+                const faceVerts = getDataFaceVertexIndices(objData, faceIndex);
+                nextVerts.add(faceVerts[0]);
+                nextVerts.add(faceVerts[1]);
+                nextVerts.add(faceVerts[2]);
+            });
+
+            return {
+                faceIndices: Array.from(nextFaces),
+                vertexIndices: Array.from(nextVerts)
+            };
+        }
+
+        let nextPoints;
+        if (operation === 'replace') {
+            nextPoints = new Set(staged.pointIndices);
+        } else if (operation === 'add') {
+            nextPoints = new Set(initial.pointIndices);
+            staged.pointIndices.forEach(pointIndex => nextPoints.add(pointIndex));
+        } else {
+            nextPoints = new Set(initial.pointIndices);
+            staged.pointIndices.forEach(pointIndex => nextPoints.delete(pointIndex));
+        }
+
+        return {
+            pointIndices: Array.from(nextPoints)
+        };
+    }
+
+    function emitSelectionPayload(objData) {
+        const selectionPayload = getSelectionPayload(objData);
+        if (!selectionPayload) return;
+        lastSelectionInfo = selectionPayload;
+        if (socket) {
+            const payload = { selection: selectionPayload };
+            if (window.viewerId) payload.viewer_id = window.viewerId;
+            socket.emit('events.selection', payload);
+        }
+    }
+
+    function applyBrushPreviewSelection(objData) {
+        if (!objData || selectionInteraction.mode !== 'brush') return;
+        const operation = getSelectionOperation();
+        const previewResult = buildBrushPreviewResult(objData, operation);
+        applySelectionResult(objData, previewResult, 'replace', false);
+        selectionInteraction.previewApplied = true;
+    }
+
+    function restoreSelectionFromSnapshot(objData, snapshot) {
+        if (!objData || !snapshot) return;
+        const result = selectionResultFromSnapshot(objData, snapshot);
+        applySelectionResult(objData, result, 'replace', false);
+    }
+
+    function applySelectionResult(objData, nextResult, operation = 'replace', emit = true) {
+        if (!objData || !nextResult) return;
+        const state = ensureObjectSelectionState(objData.data.id, objData.type);
+
+        if (objData.type === 'mesh') {
+            const nextFaces = new Set(nextResult.faceIndices || []);
+            const nextVerts = new Set(nextResult.vertexIndices || []);
+            if (operation === 'replace') {
+                state.faceIndices = nextFaces;
+                state.vertexIndices = nextVerts;
+            } else if (operation === 'add') {
+                nextFaces.forEach(i => state.faceIndices.add(i));
+                nextVerts.forEach(i => state.vertexIndices.add(i));
+            } else if (operation === 'subtract') {
+                nextFaces.forEach(i => state.faceIndices.delete(i));
+                nextVerts.forEach(i => state.vertexIndices.delete(i));
+            }
+
+            if (state.faceIndices.size > 0) {
+                const rebuiltVerts = new Set();
+                state.faceIndices.forEach(faceIndex => {
+                    const verts = getDataFaceVertexIndices(objData, faceIndex);
+                    rebuiltVerts.add(verts[0]);
+                    rebuiltVerts.add(verts[1]);
+                    rebuiltVerts.add(verts[2]);
+                });
+                state.vertexIndices = rebuiltVerts;
+            } else if (operation !== 'add') {
+                state.vertexIndices.clear();
+            }
+        } else if (objData.type === 'points') {
+            const nextPoints = new Set(nextResult.pointIndices || []);
+            if (operation === 'replace') {
+                state.pointIndices = nextPoints;
+            } else if (operation === 'add') {
+                nextPoints.forEach(i => state.pointIndices.add(i));
+            } else if (operation === 'subtract') {
+                nextPoints.forEach(i => state.pointIndices.delete(i));
+            }
+        }
+
+        refreshObjectSelectionOverlay(objData.data.id);
+        if (emit) {
+            emitSelectionPayload(objData);
+        } else {
+            const selectionPayload = getSelectionPayload(objData);
+            if (selectionPayload) {
+                lastSelectionInfo = selectionPayload;
+            }
+        }
+    }
+
+    function getSelectionPayload(objData) {
+        if (!objData || !objData.data || !objData.data.id) return null;
+        const state = ensureObjectSelectionState(objData.data.id, objData.type);
+        if (objData.type === 'mesh') {
+            return {
+                object_name: objData.data.id,
+                object_type: 'mesh',
+                selection_result: {
+                    face_indices: Array.from(state.faceIndices).sort((a, b) => a - b),
+                    vertex_indices: Array.from(state.vertexIndices).sort((a, b) => a - b)
+                }
+            };
+        }
+        if (objData.type === 'points') {
+            return {
+                object_name: objData.data.id,
+                object_type: 'points',
+                selection_result: {
+                    point_indices: Array.from(state.pointIndices).sort((a, b) => a - b)
+                }
+            };
+        }
+        return null;
+    }
+
+    function clearSelectionForObject(objectId, emit = true) {
+        const objData = objects[objectId];
+        if (!objData) return;
+        const state = ensureObjectSelectionState(objectId, objData.type);
+        state.faceIndices.clear();
+        state.vertexIndices.clear();
+        state.pointIndices.clear();
+        refreshObjectSelectionOverlay(objectId);
+        if (emit) {
+            applySelectionResult(objData, objData.type === 'mesh'
+                ? { faceIndices: [], vertexIndices: [] }
+                : { pointIndices: [] }, 'replace', true);
+        }
+    }
+
+    function getSelectionInfo() {
+        if (!lastSelectionInfo) return null;
+        return JSON.parse(JSON.stringify(lastSelectionInfo));
+    }
+
+    function buildRegionFromInteraction() {
+        if (selectionInteraction.mode === 'box') {
+            const [sx, sy] = selectionInteraction.start;
+            const [cx, cy] = selectionInteraction.current;
+            return {
+                type: 'box',
+                minX: Math.min(sx, cx),
+                minY: Math.min(sy, cy),
+                maxX: Math.max(sx, cx),
+                maxY: Math.max(sy, cy)
+            };
+        }
+        if (selectionInteraction.mode === 'lasso') {
+            const points = [...selectionInteraction.points, selectionInteraction.current];
+            if (points.length < 3) return null;
+            return {
+                type: 'lasso',
+                points
+            };
+        }
+        return null;
+    }
+
+    function shouldHandleSelectionPointerEvent(event) {
+        if (!selectionTool.enabled) return false;
+        if (event.button !== undefined && event.button !== 0) return false;
+        if (isFromUIPanelTarget(event.target)) return false;
+        if (gizmo && gizmo.isDragging()) return false;
+        return Boolean(getActiveSelectableObjectData());
+    }
+
+    function startSelectionInteraction(event) {
+        if (!shouldHandleSelectionPointerEvent(event)) return;
+        const objData = getActiveSelectableObjectData();
+        if (!objData) return;
+
+        const rect = container.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        brushCursor.valid = true;
+        brushCursor.x = x;
+        brushCursor.y = y;
+
+        selectionInteraction.active = true;
+        selectionInteraction.pointerId = event.pointerId ?? null;
+        selectionInteraction.mode = selectionTool.mode;
+        selectionInteraction.objectId = objData.data.id;
+        selectionInteraction.start = [x, y];
+        selectionInteraction.current = [x, y];
+        selectionInteraction.points = [[x, y]];
+        selectionInteraction.controlsEnabledBefore = controls.enabled;
+        selectionInteraction.stagedSelection = {
+            faceIndices: new Set(),
+            vertexIndices: new Set(),
+            pointIndices: new Set()
+        };
+        selectionInteraction.initialSelection = cloneSelectionSnapshot(objData);
+        selectionInteraction.previewApplied = false;
+
+        if (selectionInteraction.mode === 'brush') {
+            collectBrushSelection(
+                objData,
+                event.clientX,
+                event.clientY,
+                Number(selectionTool.brushRadius || 0.1),
+                selectionInteraction.stagedSelection
+            );
+            applyBrushPreviewSelection(objData);
+        }
+
+        controls.enabled = false;
+        drawSelectionOverlayCanvas();
+        event.preventDefault();
+    }
+
+    function updateSelectionInteraction(event) {
+        if (!selectionInteraction.active) return;
+        if (selectionInteraction.pointerId !== null && event.pointerId !== selectionInteraction.pointerId) return;
+
+        const rect = container.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        selectionInteraction.current = [x, y];
+        brushCursor.valid = true;
+        brushCursor.x = x;
+        brushCursor.y = y;
+
+        if (selectionInteraction.mode === 'lasso') {
+            const prev = selectionInteraction.points[selectionInteraction.points.length - 1];
+            const dx = x - prev[0];
+            const dy = y - prev[1];
+            if (dx * dx + dy * dy > 9) {
+                selectionInteraction.points.push([x, y]);
+            }
+        } else if (selectionInteraction.mode === 'brush') {
+            const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+            if (objData) {
+                collectBrushSelection(
+                    objData,
+                    event.clientX,
+                    event.clientY,
+                    Number(selectionTool.brushRadius || 0.1),
+                    selectionInteraction.stagedSelection
+                );
+                applyBrushPreviewSelection(objData);
+            }
+        }
+
+        drawSelectionOverlayCanvas();
+        event.preventDefault();
+    }
+
+    function finishSelectionInteraction(event) {
+        if (!selectionInteraction.active) return;
+        if (selectionInteraction.pointerId !== null && event.pointerId !== selectionInteraction.pointerId) return;
+
+        const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+        const operation = getSelectionOperation();
+
+        if (objData) {
+            if (selectionInteraction.mode === 'box' || selectionInteraction.mode === 'lasso') {
+                const region = buildRegionFromInteraction();
+                if (region) {
+                    if (objData.type === 'mesh') {
+                        const res = collectRegionSelectionMesh(objData, region, !!selectionTool.visibleOnly);
+                        applySelectionResult(objData, res, operation, true);
+                    } else if (objData.type === 'points') {
+                        const res = collectRegionSelectionPoints(objData, region, false);
+                        applySelectionResult(objData, res, operation, true);
+                    }
+                }
+            } else if (selectionInteraction.mode === 'brush') {
+                collectBrushSelection(
+                    objData,
+                    event.clientX,
+                    event.clientY,
+                    Number(selectionTool.brushRadius || 0.1),
+                    selectionInteraction.stagedSelection
+                );
+                applyBrushPreviewSelection(objData);
+                emitSelectionPayload(objData);
+            } else if (selectionInteraction.mode === 'bucket') {
+                const res = collectBucketSelection(objData, event.clientX, event.clientY);
+                if (res) {
+                    applySelectionResult(objData, res, operation, true);
+                }
+            }
+        }
+
+        selectionInteraction.active = false;
+        selectionInteraction.pointerId = null;
+        selectionInteraction.mode = null;
+        selectionInteraction.objectId = null;
+        selectionInteraction.points = [];
+        selectionInteraction.stagedSelection = null;
+        selectionInteraction.initialSelection = null;
+        selectionInteraction.previewApplied = false;
+        controls.enabled = selectionInteraction.controlsEnabledBefore;
+        clearSelectionOverlayCanvas();
+        drawSelectionOverlayCanvas();
+    }
+
+    function cancelSelectionInteraction() {
+        if (!selectionInteraction.active) return;
+        const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+        if (selectionInteraction.mode === 'brush' && objData && selectionInteraction.previewApplied) {
+            restoreSelectionFromSnapshot(objData, selectionInteraction.initialSelection);
+        }
+        selectionInteraction.active = false;
+        selectionInteraction.pointerId = null;
+        selectionInteraction.mode = null;
+        selectionInteraction.objectId = null;
+        selectionInteraction.points = [];
+        selectionInteraction.stagedSelection = null;
+        selectionInteraction.initialSelection = null;
+        selectionInteraction.previewApplied = false;
+        controls.enabled = selectionInteraction.controlsEnabledBefore;
+        clearSelectionOverlayCanvas();
+        drawSelectionOverlayCanvas();
+    }
+
+    function handleSelectionKeyDown(event) {
+        if (!selectionTool.enabled) return;
+        if (isTextInputElement(event.target)) return;
+
+        if (event.code === 'KeyA') {
+            selectionKeyState.add = true;
+            if (selectionInteraction.active && selectionInteraction.mode === 'brush') {
+                const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+                if (objData) applyBrushPreviewSelection(objData);
+            }
+            return;
+        }
+        if (event.code === 'KeyS') {
+            selectionKeyState.subtract = true;
+            if (selectionInteraction.active && selectionInteraction.mode === 'brush') {
+                const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+                if (objData) applyBrushPreviewSelection(objData);
+            }
+            return;
+        }
+        if (event.code === 'KeyD') {
+            const objData = getActiveSelectableObjectData();
+            if (objData) {
+                applySelectionResult(
+                    objData,
+                    objData.type === 'mesh'
+                        ? { faceIndices: [], vertexIndices: [] }
+                        : { pointIndices: [] },
+                    'replace',
+                    true
+                );
+                if (selectionInteraction.active &&
+                    selectionInteraction.mode === 'brush' &&
+                    selectionInteraction.objectId === objData.data.id) {
+                    selectionInteraction.initialSelection = cloneSelectionSnapshot(objData);
+                    selectionInteraction.stagedSelection = {
+                        faceIndices: new Set(),
+                        vertexIndices: new Set(),
+                        pointIndices: new Set()
+                    };
+                }
+            }
+            event.preventDefault();
+        }
+    }
+
+    function handleSelectionKeyUp(event) {
+        if (event.code === 'KeyA') {
+            selectionKeyState.add = false;
+            if (selectionInteraction.active && selectionInteraction.mode === 'brush') {
+                const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+                if (objData) applyBrushPreviewSelection(objData);
+            }
+            return;
+        }
+        if (event.code === 'KeyS') {
+            selectionKeyState.subtract = false;
+            if (selectionInteraction.active && selectionInteraction.mode === 'brush') {
+                const objData = selectionInteraction.objectId ? objects[selectionInteraction.objectId] : null;
+                if (objData) applyBrushPreviewSelection(objData);
+            }
+        }
+    }
+
+    const handlePointerDown = (event) => {
+        if (!selectionTool.enabled) return;
+        startSelectionInteraction(event);
+    };
+
+    const handlePointerMove = (event) => {
+        if (!selectionTool.enabled) return;
+        if (selectionTool.mode === 'brush') {
+            const rect = container.getBoundingClientRect();
+            brushCursor.valid = true;
+            brushCursor.x = event.clientX - rect.left;
+            brushCursor.y = event.clientY - rect.top;
+            if (!selectionInteraction.active) {
+                selectionInteraction.current = [brushCursor.x, brushCursor.y];
+                drawSelectionOverlayCanvas();
+            }
+        }
+        updateSelectionInteraction(event);
+    };
+
+    const handlePointerUp = (event) => {
+        if (!selectionTool.enabled) return;
+        finishSelectionInteraction(event);
+    };
+
+    const handlePointerLeave = () => {
+        brushCursor.valid = false;
+        if (!selectionInteraction.active) {
+            drawSelectionOverlayCanvas();
+        }
+    };
+
+    container.addEventListener('pointerdown', handlePointerDown);
+    container.addEventListener('pointermove', handlePointerMove);
+    container.addEventListener('pointerleave', handlePointerLeave);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', cancelSelectionInteraction);
+    document.addEventListener('keydown', handleSelectionKeyDown);
+    document.addEventListener('keyup', handleSelectionKeyUp);
     
     // Add click event listener for object selection and inspection
     container.addEventListener('click', (event) => {
+        if (selectionTool.enabled) {
+            return;
+        }
         // Check if click originated from a UI panel - if so, ignore it
         // TODO: this is a hack we should find a better way to do this
         const target = event.target;
-        const isFromUIPanel = target.closest('.console-window') || 
-                             target.closest('.layers-panel') || 
-                             target.closest('.transform-panel') ||
-                             target.closest('.ui-panel') ||
-                             target.closest('.scene-toolbar') ||
-                             target.closest('.render-toolbar') ||
-                             target.closest('.lighting-toolbar') ||
-                             target.closest('.info-bar');
+        const isFromUIPanel = isFromUIPanelTarget(target);
         if (isFromUIPanel) {
             return;
         }
@@ -1140,12 +1936,20 @@ export function createSceneManager(container, socket, callbacks = {}, background
             arrows: ['starts', 'ends', 'color', 'width']
         };
 
-        const TRANSFORM_PROPERTIES = ['position', 'rotation', 'scale'];
-        const MATERIAL_PROPERTIES = ['material', 'opacity', 'visible'];
-
         // Check if any geometry properties need updating
         const geometryProps = GEOMETRY_PROPERTIES[objData.type] || [];
         const hasGeometryUpdates = geometryProps.some(prop => updates[prop] !== undefined);
+
+        if (hasGeometryUpdates && (objData.type === 'mesh' || objData.type === 'points')) {
+            applySelectionResult(
+                objData,
+                objData.type === 'mesh'
+                    ? { faceIndices: [], vertexIndices: [] }
+                    : { pointIndices: [] },
+                'replace',
+                false
+            );
+        }
         
         // Try in-place geometry updates first
         if (hasGeometryUpdates) {
@@ -1159,6 +1963,10 @@ export function createSceneManager(container, socket, callbacks = {}, background
         updateTransforms(objData, updates);
         updateProperties(objData, updates);
         updateSelectionIfNeeded(objData, id);
+
+        if (selectionByObject[id] && selectionByObject[id].overlay) {
+            refreshObjectSelectionOverlay(id);
+        }
 
         return objData;
     }
@@ -1184,6 +1992,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         const { object, data, type } = objData;
         const geom = object.geometry;
         let success = true;
+        let shouldInvalidateBVH = false;
 
         if (updates.vertices !== undefined) {
             const newVerts = updates.vertices.flat();
@@ -1192,6 +2001,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 posAttr.array.set(newVerts);
                 posAttr.needsUpdate = true;
                 data.vertices = updates.vertices;
+                shouldInvalidateBVH = true;
             } else {
                 success = false;
             }
@@ -1204,6 +2014,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 idxAttr.array.set(newIndices);
                 idxAttr.needsUpdate = true;
                 data.faces = updates.faces;
+                shouldInvalidateBVH = true;
             } else {
                 success = false;
             }
@@ -1275,6 +2086,10 @@ export function createSceneManager(container, socket, callbacks = {}, background
             const hasFaceColors = data.face_colors && data.face_colors.length > 0;
             object.material.vertexColors = hasVertexColors || hasFaceColors;
             object.material.needsUpdate = true;
+        }
+
+        if (success && shouldInvalidateBVH) {
+            invalidateMeshBVH(objData);
         }
 
         return success;
@@ -1467,6 +2282,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         if (!objData) return;
         
         const { object } = objData;
+        disposeObjectSelectionOverlay(id);
         
         scene.remove(object);
         
@@ -1482,6 +2298,9 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
         
         if (object.geometry) {
+            if (object.geometry.boundsTree && typeof object.geometry.disposeBoundsTree === 'function') {
+                object.geometry.disposeBoundsTree();
+            }
             object.geometry.dispose();
         }
         
@@ -1494,6 +2313,10 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
         
         delete objects[id];
+        delete selectionByObject[id];
+        if (lastSelectionInfo && lastSelectionInfo.object_name === id) {
+            lastSelectionInfo = null;
+        }
         
         if (selectedObject && selectedObject.data.id === id) {
             selectedObject = null;
@@ -1518,6 +2341,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         camera.updateProjectionMatrix();
         renderer.setSize(width, height, true);
         renderer.setPixelRatio(window.devicePixelRatio);
+        resizeSelectionCanvas();
+        drawSelectionOverlayCanvas();
     }
     
     function update() {
@@ -1681,16 +2506,31 @@ export function createSceneManager(container, socket, callbacks = {}, background
     
     function clearAllObjects() {
         Object.keys(objects).forEach(deleteObject);
+        Object.keys(selectionByObject).forEach(key => delete selectionByObject[key]);
+        lastSelectionInfo = null;
+        cancelSelectionInteraction();
+        clearSelectionOverlayCanvas();
         if (typeof onSceneObjectsChange === 'function') {
             onSceneObjectsChange();
         }
     }
     
     function dispose() {
+        window.removeEventListener('pointerup', handlePointerUp);
+        window.removeEventListener('pointercancel', cancelSelectionInteraction);
+        document.removeEventListener('keydown', handleSelectionKeyDown);
+        document.removeEventListener('keyup', handleSelectionKeyUp);
+        container.removeEventListener('pointerdown', handlePointerDown);
+        container.removeEventListener('pointermove', handlePointerMove);
+        container.removeEventListener('pointerleave', handlePointerLeave);
+
         clearAllObjects();
         clearInspectionHighlights();
         if (container.contains(inspectionDiv)) {
             container.removeChild(inspectionDiv);
+        }
+        if (container.contains(selectionCanvas)) {
+            container.removeChild(selectionCanvas);
         }
         
         // Dispose gizmo
@@ -1896,6 +2736,23 @@ export function createSceneManager(container, socket, callbacks = {}, background
         if (window.viewerId) payload.viewer_id = window.viewerId;
         socket.emit('events.select_object', payload);
     }
+
+    function setSelectionTool(nextTool = {}) {
+        const prevMode = selectionTool.mode;
+        selectionTool = { ...selectionTool, ...nextTool };
+        if (!selectionTool.enabled || prevMode !== selectionTool.mode) {
+            cancelSelectionInteraction();
+            clearSelectionOverlayCanvas();
+        }
+        if (!selectionTool.enabled) {
+            selectionKeyState.add = false;
+            selectionKeyState.subtract = false;
+            brushCursor.valid = false;
+        } else if (selectionTool.mode !== 'brush') {
+            brushCursor.valid = false;
+        }
+        drawSelectionOverlayCanvas();
+    }
     
     return {
         update,
@@ -1911,6 +2768,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         updateObject,
         toggleAnimatedMeshPlayback,
         getScreenshot,
+        getSelectionInfo,
+        setSelectionTool,
         setCamera,
         lookAt,
         renderer,

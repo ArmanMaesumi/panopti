@@ -17,7 +17,7 @@ import io
 
 from .server.app import create_app
 from .comms.websocket import SocketManager, RemoteSocketIO
-from .events import EventDispatcher
+from .events import EventDispatcher, _dict_to_selection_info
 from .objects.mesh import Mesh
 from .objects.animated_mesh import AnimatedMesh
 from .objects.points import Points
@@ -469,7 +469,7 @@ class ViewerClient(BaseViewer):
         # State requests:
         self.client.on('request_state_from_client', self.handle_request_state)
 
-        self._request_events = ['camera_info', 'selected_object', 'screenshot']
+        self._request_events = ['camera_info', 'selected_object', 'screenshot', 'selection_info']
         self._request_threads = {k: threading.Event() for k in self._request_events}
         self._request_data = {k: None for k in self._request_events}
         for event in self._request_events:
@@ -478,6 +478,7 @@ class ViewerClient(BaseViewer):
         # events:
         self.client.on('events.camera', self.handle_events_camera)
         self.client.on('events.inspect', self.handle_events_inspect)
+        self.client.on('events.selection', self.handle_events_selection)
         self.client.on('events.select_object', self.handle_events_select_object)
         self.client.on('events.gizmo', self.handle_events_gizmo)
         # events.control is handled internally
@@ -814,6 +815,24 @@ class ViewerClient(BaseViewer):
             return arr
         return None
 
+    def selection(self, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
+        """Return a `SelectionInfo` object with the current selection information from 
+        the frontend populated by various selection tools (e.g. box, lasso, etc).
+
+        | attribute        | meaning                                                                                                                         | type   |
+        |------------------|---------------------------------------------------------------------------------------------------------------------------------|--------|
+        | object_name      | `name` attribute of selected object                                                                                             | str    |
+        | object_type      | type of Panopti object selected (e.g., `'mesh'`, `'points'`)                                                               | str    |                                                                                     | ndarray   |
+        | selection_result | geometry-specific data at the pick point:<br><br>**Mesh**: `MeshSelectionResult` holding `face_indices` and `vertex_indices`<br><br>**PointCloud**: `PointCloudSelectionResult` holding `point_indices` | Union[MeshSelectionResult, PointCloudSelectionResult]   |
+        """
+        self.emit_state_request({'event': 'request_selection_info', 'viewer_id': self.viewer_id})
+        if self._request_threads['selection_info'].wait(timeout):
+            selection_data = as_array(self._request_data['selection_info'])
+            if selection_data is not None:
+                selection_data = _dict_to_selection_info(selection_data)
+            return selection_data
+        return None
+
     def set_camera(self, **kwargs) -> None:
         """Update the viewer camera.
 
@@ -879,6 +898,13 @@ class ViewerClient(BaseViewer):
         inspection_data = data.get('inspection')
         inspection_data = as_array(inspection_data)
         self.events.trigger('inspect', inspection_data)
+
+    def handle_events_selection(self, data):
+        if data.get('viewer_id') != self.viewer_id:
+            return
+        selection_data = data.get('selection')
+        selection_data = as_array(selection_data)
+        self.events.trigger('selection', selection_data)
 
     def handle_events_select_object(self, data):
         if data.get('viewer_id') != self.viewer_id:

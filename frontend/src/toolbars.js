@@ -1,4 +1,194 @@
 import React from 'react';
+import ReactDOM from 'react-dom';
+
+const SELECTION_MODE_DEFS = [
+    // { id: 'box', label: 'Box Selection', icon: 'fas fa-vector-square' },
+    { id: 'box', label: 'Box Selection', icon: 'mdi mdi-selection-drag mdi-18px' },
+    // { id: 'lasso', label: 'Lasso Selection', icon: 'fas fa-draw-polygon' },
+    { id: 'lasso', label: 'Lasso Selection', icon: 'mdi mdi-lasso mdi-18px' },
+    { id: 'brush', label: 'Brush Selection', icon: 'fas fa-paint-brush' },
+    { id: 'bucket', label: 'Bucket Selection', icon: 'fas fa-fill-drip' },
+];
+
+function getSelectionModeDef(mode) {
+    return SELECTION_MODE_DEFS.find(def => def.id === mode) || SELECTION_MODE_DEFS[0];
+}
+
+function SelectionToolSplitButton({
+    selectionTool,
+    onToggleSelectionTool,
+    onSetSelectionMode,
+    onUpdateSelectionOption
+}) {
+    const [menuOpen, setMenuOpen] = React.useState(false);
+    const rootRef = React.useRef(null);
+    const menuRef = React.useRef(null);
+    const [menuPos, setMenuPos] = React.useState({ top: 0, left: 0, minWidth: 236 });
+    const currentMode = getSelectionModeDef(selectionTool.mode);
+
+    const updateMenuPos = React.useCallback(() => {
+        if (!rootRef.current) return;
+        const rect = rootRef.current.getBoundingClientRect();
+        setMenuPos({
+            top: rect.bottom + 6,
+            left: rect.left,
+            minWidth: Math.max(236, rect.width + 120)
+        });
+    }, []);
+
+    React.useEffect(() => {
+        if (!menuOpen) return undefined;
+
+        updateMenuPos();
+
+        const handleOutsideClick = (event) => {
+            const inRoot = rootRef.current && rootRef.current.contains(event.target);
+            const inMenu = menuRef.current && menuRef.current.contains(event.target);
+            if (!inRoot && !inMenu) {
+                setMenuOpen(false);
+            }
+        };
+
+        const handleEscape = (event) => {
+            if (event.key === 'Escape') {
+                setMenuOpen(false);
+            }
+        };
+
+        const handleRelayout = () => updateMenuPos();
+
+        document.addEventListener('mousedown', handleOutsideClick);
+        document.addEventListener('keydown', handleEscape);
+        window.addEventListener('resize', handleRelayout);
+        window.addEventListener('scroll', handleRelayout, true);
+        return () => {
+            document.removeEventListener('mousedown', handleOutsideClick);
+            document.removeEventListener('keydown', handleEscape);
+            window.removeEventListener('resize', handleRelayout);
+            window.removeEventListener('scroll', handleRelayout, true);
+        };
+    }, [menuOpen, updateMenuPos]);
+
+    const renderModeOptions = () => {
+        if (selectionTool.mode === 'box' || selectionTool.mode === 'lasso') {
+            return React.createElement(
+                'label',
+                { className: 'selection-mode-option' },
+                React.createElement('input', {
+                    type: 'checkbox',
+                    checked: !!selectionTool.visibleOnly,
+                    onChange: (e) => onUpdateSelectionOption('visibleOnly', e.target.checked),
+                }),
+                React.createElement('span', null, 'Visible only'),
+            );
+        }
+
+        if (selectionTool.mode === 'brush') {
+            return React.createElement(
+                'div',
+                { className: 'selection-mode-option selection-mode-slider' },
+                React.createElement(
+                    'div',
+                    { className: 'selection-mode-slider-row' },
+                    React.createElement('span', null, 'Radius'),
+                    React.createElement('span', null, Number(selectionTool.brushRadius || 0).toFixed(2))
+                ),
+                React.createElement('input', {
+                    type: 'range',
+                    min: 0.01,
+                    max: 2.0,
+                    step: 0.01,
+                    value: selectionTool.brushRadius ?? 0.1,
+                    onChange: (e) => onUpdateSelectionOption('brushRadius', parseFloat(e.target.value)),
+                })
+            );
+        }
+
+        if (selectionTool.mode === 'bucket') {
+            return React.createElement(
+                'label',
+                { className: 'selection-mode-option' },
+                React.createElement('input', {
+                    type: 'checkbox',
+                    checked: !!selectionTool.bucketSelectComponent,
+                    onChange: (e) => onUpdateSelectionOption('bucketSelectComponent', e.target.checked),
+                }),
+                React.createElement('span', null, 'Select component')
+            );
+        }
+
+        return null;
+    };
+
+    return React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(
+            'div',
+            { className: 'selection-tool-dropdown', ref: rootRef },
+            React.createElement(
+                'div',
+                { className: 'selection-tool-split' },
+                React.createElement(
+                    'button',
+                    {
+                        className: `toolbar-button split-main tooltip ${selectionTool.enabled ? 'active' : ''}`,
+                        'data-tooltip': `${currentMode.label}${selectionTool.enabled ? ' (On)' : ' (Off)'}`,
+                        onClick: onToggleSelectionTool
+                    },
+                    React.createElement('i', { className: currentMode.icon })
+                ),
+                React.createElement(
+                    'button',
+                    {
+                        className: `toolbar-button split-caret ${menuOpen ? 'active' : ''}`,
+                        onClick: () => setMenuOpen(prev => !prev),
+                        title: 'Selection tool options'
+                    },
+                    React.createElement('i', { className: `fas fa-chevron-${menuOpen ? 'up' : 'down'}` })
+                )
+            )
+        ),
+        menuOpen && ReactDOM.createPortal(
+            React.createElement(
+                'div',
+                {
+                    ref: menuRef,
+                    className: 'selection-tool-menu selection-tool-menu-overlay',
+                    style: {
+                        top: `${menuPos.top}px`,
+                        left: `${menuPos.left}px`,
+                        minWidth: `${menuPos.minWidth}px`
+                    }
+                },
+                React.createElement('div', { className: 'selection-tool-menu-title' }, 'Selection Mode'),
+                React.createElement(
+                    'div',
+                    { className: 'selection-tool-mode-list' },
+                    SELECTION_MODE_DEFS.map(modeDef => React.createElement(
+                        'button',
+                        {
+                            key: modeDef.id,
+                            className: `selection-tool-mode-btn ${selectionTool.mode === modeDef.id ? 'active' : ''}`,
+                            onClick: () => onSetSelectionMode(modeDef.id)
+                        },
+                        React.createElement('i', { className: modeDef.icon }),
+                        React.createElement('span', null, modeDef.label)
+                    ))
+                ),
+                React.createElement('div', { className: 'selection-tool-menu-divider' }),
+                React.createElement('div', { className: 'selection-tool-menu-title' }, 'Options'),
+                renderModeOptions(),
+                React.createElement(
+                    'div',
+                    { className: 'selection-tool-hints' },
+                    'A add, S subtract, D deselect'
+                )
+            ),
+            document.body
+        )
+    );
+}
 
 export function changeBackgroundColor(sceneManagerRef, setBackgroundColor, color) {
     setBackgroundColor(color);
@@ -124,7 +314,18 @@ export function renderSceneToolbar({ resetCamera, toggleBackgroundColor, refresh
     );
 }
 
-export function renderRenderToolbar(renderSettings, toggleRenderSetting, captureCurrentView, renderToClipboard, gizmoEnabled = false, toggleGizmo = null) {
+export function renderRenderToolbar(
+    renderSettings,
+    toggleRenderSetting,
+    captureCurrentView,
+    renderToClipboard,
+    gizmoEnabled = false,
+    toggleGizmo = null,
+    selectionTool = null,
+    onToggleSelectionTool = null,
+    onSetSelectionMode = null,
+    onUpdateSelectionOption = null
+) {
     return React.createElement(
         'div',
         { className: 'render-toolbar' },
@@ -204,6 +405,15 @@ export function renderRenderToolbar(renderSettings, toggleRenderSetting, capture
                 onClick: () => toggleRenderSetting('inspectMode')
             },
             React.createElement('i', { className: 'fas fa-search' })
+        ),
+        selectionTool && onToggleSelectionTool && onSetSelectionMode && onUpdateSelectionOption && React.createElement(
+            SelectionToolSplitButton,
+            {
+                selectionTool,
+                onToggleSelectionTool,
+                onSetSelectionMode,
+                onUpdateSelectionOption
+            }
         ),
         // Gizmo toggle button
         toggleGizmo && React.createElement(
