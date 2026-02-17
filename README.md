@@ -7,9 +7,19 @@
 
 ## [ [Documentation](https://armanmaesumi.github.io/panopti/) ] - [ [PyPI](https://pypi.org/project/panopti/) ]
 
-Panopti is a Python package for interactive 3D visualization that seamlessly supports remote development setups (e.g. through SSH). It pairs a Flask server with a React+ThreeJS frontend and is designed such that users only need to write Python code, making it painless to setup interactive experiments and scenes. All code examples and demos throughout the documentation are achieved purely using Panopti in Python -- no JavaScript required!.
+Panopti is a Python package for interactive 3D visualization that is designed so that users only need to write Python code, making it painless to setup interactive experiments and scenes. All code examples and demos throughout the documentation are achieved purely using Panopti in Python -- no JavaScript required!
 
-Panopti supports various geometric data structures (e.g. meshes, point clouds), UI control elements (e.g. buttons, sliders, color pickers, interactive plots) that are programmable in Python, and global event callbacks (e.g. for camera movement, clicking on geometry).
+Panopti offers several features:
+- ✅ Remote SSH compatible
+- ✅ Headless rendering
+- ✅ Geometric primitives: meshes, point clouds, animated geometry, arrows, etc.
+- ✅ Interactive UI elements with Python callbacks
+- ✅ Programmable events: on-click, inspection tool, transformation gizmo, camera update, etc.
+- ✅ Convenience features: exporting geometry, embedding Plotly figures
+- ✅ Interactive web console that can access your Python script state
+- ✅ Material customization
+
+See the [docs](https://armanmaesumi.github.io/panopti/) for more!
 
 Install from pip:
 ```
@@ -26,10 +36,11 @@ Then you can easily define your scene, for example:
 ```python
 import panopti
 import trimesh # just for io
+import numpy as np
 
 # create panopti client that connects to server:
 viewer = panopti.connect(server_url="http://localhost:8080", viewer_id='client') 
-# viewer at: http://localhost:8080/?viewer_id=client
+# open viewer in browser: http://localhost:8080/?viewer_id=client
 
 mesh = trimesh.load('./examples/demosthenes.obj')
 verts, faces = mesh.vertices, mesh.faces
@@ -42,9 +53,10 @@ viewer.add_mesh(
 )
 
 def callback_button(viewer):
-    # Update the mesh's vertices
+    # Update mesh vertices on button press by adding Gaussian noise
     statue = viewer.get('Statue')
-    new_verts = statue.vertices * 2.0
+    noise = np.random.normal(scale=0.05, size=statue.vertices.shape)
+    new_verts = statue.vertices + noise
     statue.update(vertices=new_verts)
 
 viewer.button(callback=callback_button, name='Click Me!')
