@@ -258,7 +258,7 @@ const ConsoleWindow = ({
                 onKeyDown: handleInputKeyDown,
                 placeholder: interactiveEnabled
                     ? 'Run Python in script scope...'
-                    : 'Interactive console disabled. Enable in panopti.connect(...)',
+                    : 'Use panopti.connect(interactive_console=True) to execute Python code here',
                 autoComplete: 'off',
                 spellCheck: false,
                 disabled: !interactiveEnabled,

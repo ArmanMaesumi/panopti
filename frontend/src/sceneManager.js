@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { decode as msgpackDecode } from '@msgpack/msgpack';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js';
@@ -57,13 +56,78 @@ function unpackMsgpack(obj) {
     return obj;
 }
 
+function isDisplaySpaceRgb(r, g, b) {
+    return Number.isFinite(r) &&
+        Number.isFinite(g) &&
+        Number.isFinite(b) &&
+        r >= 0 && r <= 1 &&
+        g >= 0 && g <= 1 &&
+        b >= 0 && b <= 1;
+}
+
+function srgbToLinearChannel(c) {
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function toLinearColorArray(colors) {
+    const linearColors = new Float32Array(colors.length);
+    for (let i = 0; i < colors.length; i++) {
+        const c = colors[i];
+        if (Number.isFinite(c) && c >= 0 && c <= 1) {
+            linearColors[i] = srgbToLinearChannel(c);
+        } else {
+            linearColors[i] = c;
+        }
+    }
+    return linearColors;
+}
+
+const TONE_MAPPING_MAP = {
+    none: THREE.NoToneMapping,
+    linear: THREE.LinearToneMapping,
+    reinhard: THREE.ReinhardToneMapping,
+    cineon: THREE.CineonToneMapping,
+    acesfilmic: THREE.ACESFilmicToneMapping
+};
+
+if (THREE['AgXToneMapping'] !== undefined) {
+    TONE_MAPPING_MAP.agx = THREE['AgXToneMapping'];
+}
+
+function parseToneMapping(toneMapping, fallback = THREE.ACESFilmicToneMapping) {
+    if (typeof toneMapping === 'number') {
+        return toneMapping;
+    }
+    if (typeof toneMapping !== 'string') {
+        return fallback;
+    }
+
+    const normalized = toneMapping.toLowerCase().replace(/[\s_-]+/g, '');
+    return TONE_MAPPING_MAP[normalized] ?? fallback;
+}
+
+function parseToneMappingExposure(exposure, fallback = 0.95) {
+    const parsed = Number(exposure);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return parsed;
+}
+
 // Helper to parse hex color or rgb array
 function parseColor(color) {
-    if (typeof color === 'string') {
+    if (typeof color === 'string' || typeof color === 'number') {
         return new THREE.Color(color);
-    } else if (Array.isArray(color)) {
-        return new THREE.Color(...color);
     }
+
+    if (Array.isArray(color) && color.length >= 3) {
+        const [r, g, b] = color;
+        if (isDisplaySpaceRgb(r, g, b)) {
+            return new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace);
+        }
+        return new THREE.Color(r, g, b);
+    }
+
     return new THREE.Color(0xffffff);
 }
 
@@ -72,7 +136,7 @@ function addLightFromConfig(scene, lightConfig) {
     let light;
     // type, color, intensity are required
     const type = lightConfig.type;
-    const color = lightConfig.color;
+    const color = parseColor(lightConfig.color);
     const intensity = lightConfig.intensity;
     if (type === undefined || color === undefined || intensity === undefined) {
         return;
@@ -120,11 +184,14 @@ function expandVerticesForNonIndexed(vertices, faces) {
 // Main Three.js scene setup:
 export function createSceneManager(container, socket, callbacks = {}, backgroundColor = '#f0f0f0', cameraConfig = null, setShowWidget) {
     const { onSelectObject, onSceneObjectsChange } = callbacks;
+    THREE.ColorManagement.enabled = true;
+
+    const rendererConfig = window.panoptiConfig.viewer.renderer || {};
+
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(backgroundColor);
+    scene.background = parseColor(backgroundColor);
 
     // --- Parse lights in .panopti.toml ---
-    const rendererConfig = window.panoptiConfig.viewer.renderer;
     Object.entries(rendererConfig).forEach(([key, value]) => {
         if (key.startsWith('light-')) {
             addLightFromConfig(scene, value);
@@ -152,15 +219,18 @@ export function createSceneManager(container, socket, callbacks = {}, background
         antialias: true,
         alpha: true,
         preserveDrawingBuffer: true,
-        powerPreference: window.panoptiConfig.viewer.renderer['power-preference']
+        powerPreference: rendererConfig['power-preference']
     });
+
+    const toneMapping = parseToneMapping(rendererConfig['tone-mapping']);
+    const toneMappingExposure = parseToneMappingExposure(rendererConfig['tone-mapping-exposure']);
 
     renderer.setSize(clientWidth, clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.shadowMap.enabled = true;
-    // renderer.toneMapping = THREE.NeutralToneMapping;
-    renderer.toneMappingExposure = 1.0;
-    THREE.ColorManagement.enabled = true;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = toneMapping;
+    renderer.toneMappingExposure = toneMappingExposure;
     container.appendChild(renderer.domElement);
     
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -687,7 +757,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         let vcolors = false;
         let fcolors = false;
         if (data.vertex_colors) {
-            const colors = new Float32Array(data.vertex_colors.flat());
+            const colors = toLinearColorArray(data.vertex_colors.flat());
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             vcolors = true;
         }else if (data.face_colors) {
@@ -698,7 +768,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 colors.push(...data.face_colors[i]);
                 colors.push(...data.face_colors[i]);
             }
-            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(toLinearColorArray(colors), 3));
             fcolors = true;
         }
         
@@ -825,9 +895,9 @@ export function createSceneManager(container, socket, callbacks = {}, background
         // Set vertex colors if available (using first frame)
         let vcolors = false;
         let fcolors = false;
-        let baseColor = new THREE.Color(data.color[0], data.color[1], data.color[2]);
+        let baseColor = parseColor(data.color);
         if (data.vertex_colors) {
-            const colors = new Float32Array(data.vertex_colors.flat());
+            const colors = toLinearColorArray(data.vertex_colors.flat());
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             vcolors = true;
             baseColor = new THREE.Color(1.0, 1.0, 1.0);
@@ -839,7 +909,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 colors.push(...data.face_colors[i]);
                 colors.push(...data.face_colors[i]);
             }
-            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(toLinearColorArray(colors), 3));
             fcolors = true;
             baseColor = new THREE.Color(1.0, 1.0, 1.0);
         }
@@ -928,7 +998,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             });
         } else {
             material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(data.colors[0], data.colors[1], data.colors[2])
+                color: parseColor(data.colors)
             });
         }
         // set opacity:
@@ -954,7 +1024,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
 
             if (usePerColor) {
                 const c = data.colors[i];
-                spheres.setColorAt(i, new THREE.Color(c[0], c[1], c[2]));
+                spheres.setColorAt(i, parseColor(c));
             }
         }
 
@@ -1021,7 +1091,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         data.opacity = data.opacity;
         data.transparent = data.opacity < 1.0;
         for (let i = 0; i < starts.length; i++) {
-            let col = Array.isArray(data.color[0]) ? new THREE.Color(data.color[i][0], data.color[i][1], data.color[i][2]) : new THREE.Color(data.color[0], data.color[1], data.color[2]);
+            let col = Array.isArray(data.color[0]) ? parseColor(data.color[i]) : parseColor(data.color);
             const arrowHelper = customArrow(
                 starts[i][0], starts[i][1], starts[i][2],
                 ends[i][0], ends[i][1], ends[i][2],
@@ -1144,16 +1214,17 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 delete data.vertex_colors;
             } else {
                 const newColors = updates.vertex_colors.flat();
+                const linearColors = toLinearColorArray(newColors);
                 const colorAttr = geom.getAttribute('color');
                 if (colorAttr && colorAttr.count * 3 === newColors.length) {
-                    colorAttr.array.set(newColors);
+                    colorAttr.array.set(linearColors);
                     colorAttr.needsUpdate = true;
                     data.vertex_colors = updates.vertex_colors;
                 } else {
                     // Try to replace the color attribute if vertex count matches
                     const posAttr = geom.getAttribute('position');
                     if (posAttr && posAttr.count * 3 === newColors.length) {
-                        geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(newColors), 3));
+                        geom.setAttribute('color', new THREE.BufferAttribute(linearColors, 3));
                         geom.attributes.color.needsUpdate = true;
                         data.vertex_colors = updates.vertex_colors;
                     } else {
@@ -1177,16 +1248,17 @@ export function createSceneManager(container, socket, callbacks = {}, background
                         newColors.push(...updates.face_colors[i]);
                         newColors.push(...updates.face_colors[i]);
                     }
+                    const linearColors = toLinearColorArray(newColors);
                     const colorAttr = geom.getAttribute('color');
                     if (colorAttr && colorAttr.count * 3 === newColors.length) {
-                        colorAttr.array.set(newColors);
+                        colorAttr.array.set(linearColors);
                         colorAttr.needsUpdate = true;
                         data.face_colors = updates.face_colors;
                     } else {
                         // Try to replace the color attribute if vertex count matches
                         const posAttr = geom.getAttribute('position');
                         if (posAttr && posAttr.count * 3 === newColors.length) {
-                            geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(newColors), 3));
+                            geom.setAttribute('color', new THREE.BufferAttribute(linearColors, 3));
                             geom.attributes.color.needsUpdate = true;
                             data.face_colors = updates.face_colors;
                         } else {
@@ -1240,7 +1312,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             if (object.count === count && object.instanceColor) {
                 for (let i = 0; i < count; i++) {
                     const c = updates.colors[i];
-                    object.setColorAt(i, new THREE.Color(c[0], c[1], c[2]));
+                    object.setColorAt(i, parseColor(c));
                 }
                 object.instanceColor.needsUpdate = true;
                 data.colors = updates.colors;
@@ -1604,7 +1676,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
     }
     
     function setBackgroundColor(colorHex) {
-        scene.background = new THREE.Color(colorHex);
+        scene.background = parseColor(colorHex);
     }
     
     function clearAllObjects() {
@@ -1798,7 +1870,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             renderer.setClearColor(0x000000, 0);
             scene.background = null;
         } else { // solid background
-            scene.background = new THREE.Color(bgColor[0], bgColor[1], bgColor[2]);
+            scene.background = parseColor(bgColor);
         }
         renderer.render(scene, camera);
         const dataURL = renderer.domElement.toDataURL('image/png');

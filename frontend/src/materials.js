@@ -11,10 +11,26 @@ import * as THREE from 'three';
  * @returns {THREE.Color} Three.js Color object
  */
 function parseColor(color) {
+    const fromRgbArray = (rgb) => {
+        const [r, g, b] = rgb;
+        const isDisplaySpaceRGB =
+            Number.isFinite(r) &&
+            Number.isFinite(g) &&
+            Number.isFinite(b) &&
+            r >= 0 && r <= 1 &&
+            g >= 0 && g <= 1 &&
+            b >= 0 && b <= 1;
+
+        if (isDisplaySpaceRGB) {
+            return new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace);
+        }
+        return new THREE.Color(r, g, b);
+    };
+
     if (typeof color === 'string') {
         return new THREE.Color(color);
     } else if (Array.isArray(color)) {
-        return new THREE.Color(...color);
+        return fromRgbArray(color);
     }
     return new THREE.Color(0xffffff);
 }

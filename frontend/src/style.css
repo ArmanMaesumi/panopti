@@ -481,7 +481,7 @@ button:disabled {
     border-radius: 4px;
     background: rgba(8, 13, 20, 0.94);
     backdrop-filter: blur(6px);
-    box-shadow: 0 10px 25px var(--shadow-strong);
+    box-shadow: 0 1px 6px var(--shadow-strong);
 }
 
 .render-toolbar {
@@ -574,7 +574,7 @@ button:disabled {
     bottom: 0px;
     z-index: 7;
     min-height: 36px;
-    padding: 6px 9px;
+    padding: 6px 6px;
     border-radius: 0px;
     border: 1px solid #2a3647;
     background: rgba(8, 12, 19, 0.94);

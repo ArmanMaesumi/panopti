@@ -9,6 +9,8 @@ axes.enabled = true
 [viewer.renderer]
 max-fps = 60
 power-preference = "default"
+tone-mapping = "linear"
+tone-mapping-exposure = 1.0
 
 # Custom lights
 light-key     = { type = "directional", position = [10, 15, 10], target = [0, 0, 0], color = "#ffffff", intensity = 2.3, castShadow = false }
