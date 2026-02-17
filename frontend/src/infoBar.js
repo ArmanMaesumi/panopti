@@ -101,7 +101,7 @@ export function renderStatusIndicator(connectionStatus, scriptStatus, ping) {
                 ping != null && React.createElement(
                     'span',
                     { className: 'status-ping' },
-                    `Ping: ${ping} ms`
+                    `${ping} ms`
                 )
             )
         ),

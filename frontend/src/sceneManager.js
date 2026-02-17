@@ -1093,8 +1093,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         for (let i = 0; i < starts.length; i++) {
             let col = Array.isArray(data.color[0]) ? parseColor(data.color[i]) : parseColor(data.color);
             const arrowHelper = customArrow(
-                starts[i][0], starts[i][1], starts[i][2],
                 ends[i][0], ends[i][1], ends[i][2],
+                starts[i][0], starts[i][1], starts[i][2],
                 col,
                 data
             );
