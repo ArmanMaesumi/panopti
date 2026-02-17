@@ -12,7 +12,8 @@ const ConsoleWindow = ({
     consoleRef,
     interactiveEnabled,
     onSubmitCommand,
-    onRequestCompletions
+    onRequestCompletions,
+    scriptName
 }) => {
     const resizeObserverRef = useRef(null);
     const windowRef = useRef(null);
@@ -257,7 +258,7 @@ const ConsoleWindow = ({
                 },
                 onKeyDown: handleInputKeyDown,
                 placeholder: interactiveEnabled
-                    ? 'Run Python in script scope...'
+                    ? `Executing in ${scriptName} global scope...`
                     : 'Use panopti.connect(interactive_console=True) to execute Python code here',
                 autoComplete: 'off',
                 spellCheck: false,

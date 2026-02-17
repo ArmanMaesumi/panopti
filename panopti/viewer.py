@@ -484,6 +484,14 @@ class ViewerClient(BaseViewer):
         # events.update_object is handled internally
 
         self.client.on('viewer_heartbeat', self.handle_heartbeat)
+        self._session_id = uuid.uuid4().hex
+        self._emit_session_start()
+
+    def _emit_session_start(self) -> None:
+        self.socket_manager.emit(
+            'viewer_session_started',
+            {'session_id': self._session_id, 'started_at': time.time()}
+        )
 
     # --- Heartbeat (call and response): ---
     def handle_heartbeat(self, data):
@@ -938,11 +946,10 @@ def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = F
 
     if interactive_console:
         msg = (
-            "[Panopti] Interactive console ENABLED. Commands typed in the frontend "
+            "[Panopti] Interactive console ENABLED. Commands typed in the frontend console "
             "can execute arbitrary Python code in this process."
         )
-        print(msg)
-        viewer._emit_console_text(msg + "\n", color='yellow')
+        print("\033[93m" + msg + "\033[0m")
 
     return viewer
 

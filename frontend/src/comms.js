@@ -4,7 +4,16 @@ import { cameraData } from './utils.js';
 
 export function initComms(
     sceneManagerRef,
-    { setIsLoading, setControls, setConsoleLines, setConsoleInteractiveEnabled, setConnectionStatus, setPing, setViewerScriptName } = {}
+    {
+        setIsLoading,
+        setControls,
+        setConsoleLines,
+        setConsoleInteractiveEnabled,
+        setConnectionStatus,
+        setPing,
+        setViewerScriptName,
+        onViewerSessionStarted
+    } = {}
 ) {
     const opts = window.viewerId ? { query: { viewer_id: window.viewerId } } : {};
     const socket = io(opts);
@@ -79,6 +88,17 @@ export function initComms(
         setConnectionStatus('connected');
         if (data.viewer_id && window.viewerId && data.viewer_id !== window.viewerId) return;
         setViewerScriptName && setViewerScriptName(data.script_name || null);
+    });
+
+    socket.on('viewer_session_started', data => {
+        setConnectionStatus('connected');
+        if (data.viewer_id && window.viewerId && data.viewer_id !== window.viewerId) return;
+
+        onViewerSessionStarted && onViewerSessionStarted();
+
+        const req = {};
+        if (window.viewerId) req.viewer_id = window.viewerId;
+        socket.emit('request_state', req);
     });
 
     // Handlers for simple state requests -- should follow "request_{eventName} pattern:

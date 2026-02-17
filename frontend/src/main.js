@@ -178,6 +178,16 @@ const App = () => {
     const sceneManagerRef = React.useRef(null);
     const socketRef = React.useRef(null);
 
+    const clearViewerState = () => {
+        if (sceneManagerRef.current) {
+            sceneManagerRef.current.clearAllObjects();
+        }
+        setControls([]);
+        setSceneObjects([]);
+        setSelectedObject(null);
+        setViewerScriptName(null);
+    };
+
     // Load config from injected data or fallback defaults
     React.useEffect(() => {
         const injectedConfig = window.panoptiConfig;
@@ -247,7 +257,8 @@ const App = () => {
             setConsoleInteractiveEnabled,
             setConnectionStatus,
             setPing,
-            setViewerScriptName: name => setViewerScriptName(normalizeScriptName(name))
+            setViewerScriptName: name => setViewerScriptName(normalizeScriptName(name)),
+            onViewerSessionStarted: clearViewerState
         });
         socketRef.current = socket;
 
@@ -455,13 +466,10 @@ const App = () => {
     const resetCamera = () => resetCam(sceneManagerRef);
     
     const refreshState = () => {
-        // Clear existing objects and controls
-        if (sceneManagerRef.current) {
-            sceneManagerRef.current.clearAllObjects();
-        }
-        setControls([]);
-        setSelectedObject(null);
-        socketRef.current.emit('request_state', { viewer_id: window.viewerId });
+        clearViewerState();
+        const req = {};
+        if (window.viewerId) req.viewer_id = window.viewerId;
+        socketRef.current.emit('request_state', req);
     };
 
     const restartConsoleMessage = { segments: [ { text: "-------------------------------\n[Panopti] Restarting script...\n-------------------------------\n", color: "yellow" } ] };
@@ -816,7 +824,7 @@ const App = () => {
             showInfoBar && renderInfoBar(selectedObject, connectionStatus, scriptStatus, ping, widgets, toggleWidget),
             renderLayersPanel(),
             React.createElement(ConsoleWindow, {
-                key: consoleInteractiveEnabled ? 'console-enabled' : 'console-disabled',
+                scriptName: viewerScriptName,
                 consoleLines,
                 setConsoleLines,
                 consolePos,

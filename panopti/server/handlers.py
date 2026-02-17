@@ -12,6 +12,7 @@ _CONTROL_ADDS = {"add_control"}
 _OBJECT_DELETES = {"delete_object"}
 _CONTROL_DELETES = {"delete_control"}
 _VIEWER_META = {"viewer_meta"}
+_VIEWER_SESSION_START = {"viewer_session_started"}
 _EVENTS = {"events.camera", "events.inspect", "events.select_object", "events.gizmo"}
 
 def _update_viewer_state(event_type: str, data: Dict[str, Any]) -> None:
@@ -40,6 +41,12 @@ def _update_viewer_state(event_type: str, data: Dict[str, Any]) -> None:
             viewer["controls"].pop(control_id, None)
     elif event_type in _VIEWER_META:
         viewer["meta"] = data
+    elif event_type in _VIEWER_SESSION_START:
+        viewer["objects"] = {}
+        viewer["controls"] = {}
+        viewer["meta"] = {}
+        if "session_id" in data:
+            viewer["session_id"] = data["session_id"]
 
 
 def create_event_handler(event_type: str, socketio: SocketIO):
@@ -65,6 +72,7 @@ def register_handlers(app) -> None:
         | _OBJECT_DELETES
         | _CONTROL_DELETES
         | _VIEWER_META
+        | _VIEWER_SESSION_START
         | _EVENTS
         | {
             "update_object",
