@@ -428,6 +428,7 @@ class ViewerClient(BaseViewer):
         self.viewer_id = viewer_id
         self.interactive_console_enabled = bool(interactive_console)
         self._console_disabled_warning_emitted = False
+        self._caller_script_name = None
         
         # Default to localhost:8080 if no server URL provided
         if not server_url:
@@ -631,6 +632,27 @@ class ViewerClient(BaseViewer):
     def _emit_console_meta(self) -> None:
         self.socket_manager.emit('console_meta', {'enabled': self.interactive_console_enabled})
 
+    @staticmethod
+    def _normalize_script_name(script_path: Optional[str]) -> Optional[str]:
+        if script_path is None:
+            return None
+        script_path = str(script_path).strip()
+        if not script_path:
+            return None
+        if script_path.startswith('<') and script_path.endswith('>'):
+            return None
+        name = os.path.basename(script_path)
+        return name or None
+
+    def set_caller_script(self, script_path: Optional[str]) -> None:
+        self._caller_script_name = self._normalize_script_name(script_path)
+        self._emit_viewer_meta()
+
+    def _emit_viewer_meta(self) -> None:
+        if not self._caller_script_name:
+            return
+        self.socket_manager.emit('viewer_meta', {'script_name': self._caller_script_name})
+
     def handle_request_console_meta(self, data=None):
         if isinstance(data, dict):
             data_viewer_id = data.get('viewer_id')
@@ -681,6 +703,7 @@ class ViewerClient(BaseViewer):
         """Send all current objects, UI controls, and print history to the client"""
         # self.socket_manager.emit('console_meta', {'enabled': self.interactive_console_enabled})
         self._emit_console_meta()
+        self._emit_viewer_meta()
 
         # Reset the camera to default parameters for a fresh session
         self.socket_manager.emit_with_fallback(
@@ -908,6 +931,7 @@ def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = F
     try:
         if caller:
             viewer.set_console_scope(caller.f_globals, caller.f_locals)
+            viewer.set_caller_script(caller.f_code.co_filename)
     finally:
         del frame
         del caller

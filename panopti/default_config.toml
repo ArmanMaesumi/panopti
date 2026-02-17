@@ -1,7 +1,6 @@
 # Panopti configuration file
 
 title = "Panopti"
-subtitle = ""
 
 [viewer.tools]
 grid.enabled = true

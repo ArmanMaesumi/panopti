@@ -11,6 +11,7 @@ _OBJECT_ADDS = {"add_mesh", "add_animated_mesh", "add_points", "add_arrows"}
 _CONTROL_ADDS = {"add_control"}
 _OBJECT_DELETES = {"delete_object"}
 _CONTROL_DELETES = {"delete_control"}
+_VIEWER_META = {"viewer_meta"}
 _EVENTS = {"events.camera", "events.inspect", "events.select_object", "events.gizmo"}
 
 def _update_viewer_state(event_type: str, data: Dict[str, Any]) -> None:
@@ -37,6 +38,8 @@ def _update_viewer_state(event_type: str, data: Dict[str, Any]) -> None:
         control_id = data.get("id")
         if control_id:
             viewer["controls"].pop(control_id, None)
+    elif event_type in _VIEWER_META:
+        viewer["meta"] = data
 
 
 def create_event_handler(event_type: str, socketio: SocketIO):
@@ -61,6 +64,7 @@ def register_handlers(app) -> None:
         | _CONTROL_ADDS
         | _OBJECT_DELETES
         | _CONTROL_DELETES
+        | _VIEWER_META
         | _EVENTS
         | {
             "update_object",
@@ -79,4 +83,3 @@ def register_handlers(app) -> None:
         }
     ):
         socketio.on(event)(create_event_handler(event, socketio))
-

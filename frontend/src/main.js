@@ -64,10 +64,20 @@ function resolveThemeBackground(theme) {
     return theme['dark-mode'] ? theme['background-color-dark'] : theme['background-color'];
 }
 
+function normalizeScriptName(name) {
+    if (!name) return null;
+    const text = String(name).trim();
+    if (!text) return null;
+    const parts = text.split(/[/\\]/);
+    const file = parts[parts.length - 1];
+    return file || null;
+}
+
 const App = () => {
     
     // Global config:
     const [config, setConfig] = React.useState(window.panoptiConfig);
+    const [viewerScriptName, setViewerScriptName] = React.useState(null);
     const [maxFps, setMaxFps] = React.useState(60);
     const fpsCapRef = React.useRef(null);
 
@@ -236,7 +246,8 @@ const App = () => {
             setConsoleLines,
             setConsoleInteractiveEnabled,
             setConnectionStatus,
-            setPing
+            setPing,
+            setViewerScriptName: name => setViewerScriptName(normalizeScriptName(name))
         });
         socketRef.current = socket;
 
@@ -787,6 +798,7 @@ const App = () => {
             React.createElement('div', { className: 'spinner' })
         );
     };
+    const hasPanelSubtitle = Boolean(viewerScriptName);
 
     return React.createElement(
         'div',
@@ -843,7 +855,7 @@ const App = () => {
                 { className: 'ui-panel-header' },
                 React.createElement(
                     'div',
-                    { className: 'ui-panel-header-content' },
+                    { className: `ui-panel-header-content${hasPanelSubtitle ? ' has-subtitle' : ''}` },
                     React.createElement(
                         'button',
                         {
@@ -853,8 +865,12 @@ const App = () => {
                         },
                         React.createElement('i', { className: 'fas fa-chevron-right' })
                     ),
-                    React.createElement('h2', null, config.title || "Panopti"),
-                    config.subtitle && React.createElement('div', { className: 'ui-panel-subtitle' }, config.subtitle)
+                    React.createElement(
+                        'div',
+                        { className: 'ui-panel-title-block' },
+                        React.createElement('h2', null, config.title || "Panopti"),
+                        hasPanelSubtitle && React.createElement('div', { className: 'ui-panel-subtitle' }, viewerScriptName)
+                    )
                 )
             ),
             React.createElement(

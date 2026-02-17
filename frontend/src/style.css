@@ -150,11 +150,24 @@ body::before {
 .ui-panel-header-content {
     flex-grow: 1;
     display: flex;
+    align-items: stretch;
+    justify-content: center;
+    text-align: center;
+    padding: 4px 44px;
+    position: relative;
+}
+
+.ui-panel-header-content.has-subtitle {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.ui-panel-title-block {
+    display: flex;
     flex-direction: column;
     align-items: center;
-    text-align: center;
-    padding: 6px 0;
-    position: relative;
+    justify-content: center;
+    gap: 2px;
 }
 
 .ui-panel-header h2 {
@@ -177,13 +190,13 @@ body::before {
     margin: 0;
     position: absolute;
     left: 8px;
-    top: 35%;
-    transform: translateY(-50%);
-    width: auto;
-    height: auto;
+    top: 0;
+    bottom: 0;
+    width: 28px;
+    height: 100%;
     display: grid;
     place-items: center;
-    padding: 0 8px;
+    padding: 0;
     border-radius: 4px;
     color: #a9bcce;
     cursor: pointer;
