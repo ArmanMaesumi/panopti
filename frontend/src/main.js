@@ -368,6 +368,23 @@ const App = () => {
     }, [consoleLines, showConsole]);
 
     React.useEffect(() => {
+        if (!showConsole || consoleInteractiveEnabled || connectionStatus !== 'connected' || !socketRef.current) return;
+
+        const requestMeta = () => {
+            const payload = {
+                event: 'request_console_meta',
+                viewer_id: window.viewerId,
+                data: { viewer_id: window.viewerId },
+            };
+            socketRef.current.emit('relay_state_request', payload);
+        };
+
+        requestMeta();
+        const intervalId = setInterval(requestMeta, 1000);
+        return () => clearInterval(intervalId);
+    }, [showConsole, consoleInteractiveEnabled, connectionStatus]);
+
+    React.useEffect(() => {
         setTimeout(() => {
             controls.forEach(c => {
                 if (c.type === 'plotly') {
@@ -516,11 +533,22 @@ const App = () => {
 
     const toggleConsole = () => setShowConsole(prev => !prev);
 
+    const requestConsoleMeta = () => {
+        if (!socketRef.current) return;
+        const payload = {
+            event: 'request_console_meta',
+            viewer_id: window.viewerId,
+            data: { viewer_id: window.viewerId },
+        };
+        socketRef.current.emit('relay_state_request', payload);
+    };
+
     const runConsoleCommand = (command) => {
         if (!socketRef.current) return;
         const trimmed = command.trim();
         if (!trimmed) return;
         if (!consoleInteractiveEnabled) {
+            requestConsoleMeta();
             setConsoleLines(prev => [
                 ...prev,
                 {
@@ -776,6 +804,7 @@ const App = () => {
             showInfoBar && renderInfoBar(selectedObject, connectionStatus, scriptStatus, ping, widgets, toggleWidget),
             renderLayersPanel(),
             React.createElement(ConsoleWindow, {
+                key: consoleInteractiveEnabled ? 'console-enabled' : 'console-disabled',
                 consoleLines,
                 setConsoleLines,
                 consolePos,

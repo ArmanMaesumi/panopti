@@ -461,6 +461,7 @@ class ViewerClient(BaseViewer):
         self.client.on('ui_event_response', self.handle_ui_event_from_server)
         self.client.on('update_object', self.handle_update_object)
         self.client.on('restart_script', self.handle_restart_script)
+        self.client.on('request_console_meta', self.handle_request_console_meta)
         self.client.on('console_command', self.handle_console_command)
         self.client.on('console_complete', self.handle_console_complete)
 
@@ -640,6 +641,16 @@ class ViewerClient(BaseViewer):
         # For now just do a comma separated list:
         self._emit_console_text(", ".join(completions) + "\n")
 
+    def _emit_console_meta(self) -> None:
+        self.socket_manager.emit('console_meta', {'enabled': self.interactive_console_enabled})
+
+    def handle_request_console_meta(self, data=None):
+        if isinstance(data, dict):
+            data_viewer_id = data.get('viewer_id')
+            if data_viewer_id and data_viewer_id != self.viewer_id:
+                return
+        self._emit_console_meta()
+
     def handle_console_command(self, data):
         if not isinstance(data, dict):
             return
@@ -681,7 +692,8 @@ class ViewerClient(BaseViewer):
     # --- Requesting state: ---
     def handle_request_state(self, data=None):
         """Send all current objects, UI controls, and print history to the client"""
-        self.socket_manager.emit('console_meta', {'enabled': self.interactive_console_enabled})
+        # self.socket_manager.emit('console_meta', {'enabled': self.interactive_console_enabled})
+        self._emit_console_meta()
 
         # Reset the camera to default parameters for a fresh session
         self.socket_manager.emit_with_fallback(
