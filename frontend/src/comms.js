@@ -2,7 +2,10 @@ import { io } from 'socket.io-client';
 import { marked } from 'marked';
 import { cameraData } from './utils.js';
 
-export function initComms(sceneManagerRef, { setIsLoading, setControls, setConsoleLines, setConnectionStatus, setPing } = {}) {
+export function initComms(
+    sceneManagerRef,
+    { setIsLoading, setControls, setConsoleLines, setConsoleInteractiveEnabled, setConnectionStatus, setPing } = {}
+) {
     const opts = window.viewerId ? { query: { viewer_id: window.viewerId } } : {};
     const socket = io(opts);
 
@@ -17,6 +20,7 @@ export function initComms(sceneManagerRef, { setIsLoading, setControls, setConso
         console.log('connecting');
         setConnectionStatus('connected');
         setPing(null);
+        setConsoleInteractiveEnabled && setConsoleInteractiveEnabled(false);
     });
 
     socket.on('disconnect', () => {
@@ -24,6 +28,7 @@ export function initComms(sceneManagerRef, { setIsLoading, setControls, setConso
         setConnectionStatus('disconnected');
         setPing(null);
         if (setIsLoading) setIsLoading(true);
+        setConsoleInteractiveEnabled && setConsoleInteractiveEnabled(false);
     });
 
     socket.on('add_control', data => {
@@ -62,6 +67,12 @@ export function initComms(sceneManagerRef, { setIsLoading, setControls, setConso
             message = { segments: [{ text: data.text, color }] };
         }
         setConsoleLines && setConsoleLines(prev => [...prev, message]);
+    });
+
+    socket.on('console_meta', data => {
+        setConnectionStatus('connected');
+        if (data.viewer_id && window.viewerId && data.viewer_id !== window.viewerId) return;
+        setConsoleInteractiveEnabled && setConsoleInteractiveEnabled(Boolean(data.enabled));
     });
 
     // Handlers for simple state requests -- should follow "request_{eventName} pattern:

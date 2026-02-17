@@ -118,6 +118,7 @@ const App = () => {
     const [showConsole, setShowConsole] = React.useState(false);
     const [consolePos, setConsolePos] = React.useState({ x: 50, y: 50 });
     const [consoleSize, setConsoleSize] = React.useState({ width: 550, height: 250 });
+    const [consoleInteractiveEnabled, setConsoleInteractiveEnabled] = React.useState(false);
 
     // Status alerts:
     const [connectionStatus, setConnectionStatus] = React.useState('disconnected');
@@ -233,6 +234,7 @@ const App = () => {
             setIsLoading, 
             setControls, 
             setConsoleLines,
+            setConsoleInteractiveEnabled,
             setConnectionStatus,
             setPing
         });
@@ -518,6 +520,18 @@ const App = () => {
         if (!socketRef.current) return;
         const trimmed = command.trim();
         if (!trimmed) return;
+        if (!consoleInteractiveEnabled) {
+            setConsoleLines(prev => [
+                ...prev,
+                {
+                    segments: [{
+                        text: '[Panopti] Interactive console is disabled for this viewer.\n',
+                        color: 'yellow'
+                    }]
+                }
+            ]);
+            return;
+        }
 
         setConsoleLines(prev => [
             ...prev,
@@ -527,6 +541,13 @@ const App = () => {
         const payload = { command };
         if (window.viewerId) payload.viewer_id = window.viewerId;
         socketRef.current.emit('console_command', payload);
+    };
+
+    const requestConsoleCompletions = (command) => {
+        if (!socketRef.current || !consoleInteractiveEnabled) return;
+        const payload = { command };
+        if (window.viewerId) payload.viewer_id = window.viewerId;
+        socketRef.current.emit('console_complete', payload);
     };
 
     const toggleWidget = (widgetId) => {
@@ -764,7 +785,9 @@ const App = () => {
                 toggleConsole,
                 showConsole,
                 consoleRef,
+                interactiveEnabled: consoleInteractiveEnabled,
                 onSubmitCommand: runConsoleCommand,
+                onRequestCompletions: requestConsoleCompletions,
             }),
             // Render widget panels
             widgets.map(widget => 

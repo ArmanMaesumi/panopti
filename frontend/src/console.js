@@ -10,15 +10,22 @@ const ConsoleWindow = ({
     toggleConsole,
     showConsole,
     consoleRef,
-    onSubmitCommand
+    interactiveEnabled,
+    onSubmitCommand,
+    onRequestCompletions
 }) => {
     const resizeObserverRef = useRef(null);
     const windowRef = useRef(null);
     const isDragging = useRef(false);
     const dragOffset = useRef({ x: 0, y: 0 });
     const [command, setCommand] = useState('');
+    const [history, setHistory] = useState([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
+    const draftCommandRef = useRef('');
+    const lastTabRef = useRef({ at: 0, command: '' });
     const MIN_WIDTH = 300;
     const MIN_HEIGHT = 150;
+    const DOUBLE_TAB_MS = 400;
 
     const renderConsoleLines = () => {
         return consoleLines.map((line, index) => {
@@ -45,12 +52,63 @@ const ConsoleWindow = ({
 
     const handleSubmitCommand = (e) => {
         e.preventDefault();
-        if (!onSubmitCommand) return;
+        if (!onSubmitCommand || !interactiveEnabled) return;
         const trimmed = command.trim();
         if (!trimmed) return;
         onSubmitCommand(command);
+        setHistory((prev) => [...prev, command]);
+        setHistoryIndex(-1);
+        draftCommandRef.current = '';
         setCommand('');
     };
+
+    const handleInputKeyDown = (e) => {
+        if (!interactiveEnabled) return;
+
+        if (e.key === 'ArrowUp') {
+            if (history.length === 0) return;
+            e.preventDefault();
+            if (historyIndex === -1) {
+                draftCommandRef.current = command;
+            }
+            const nextIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+            setHistoryIndex(nextIndex);
+            setCommand(history[nextIndex]);
+            return;
+        }
+
+        if (e.key === 'ArrowDown') {
+            if (history.length === 0 || historyIndex === -1) return;
+            e.preventDefault();
+            const nextIndex = historyIndex + 1;
+            if (nextIndex >= history.length) {
+                setHistoryIndex(-1);
+                setCommand(draftCommandRef.current);
+                return;
+            }
+            setHistoryIndex(nextIndex);
+            setCommand(history[nextIndex]);
+            return;
+        }
+
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const now = Date.now();
+            const isDoubleTab = (
+                now - lastTabRef.current.at <= DOUBLE_TAB_MS &&
+                lastTabRef.current.command === command
+            );
+            lastTabRef.current = { at: now, command };
+
+            if (isDoubleTab && onRequestCompletions && command.trim()) {
+                onRequestCompletions(command);
+            }
+            return;
+        }
+
+        lastTabRef.current = { at: 0, command: '' };
+    };
+
 
     // Constrain position to screen boundaries
     const constrainPosition = useCallback((x, y) => {
@@ -193,14 +251,26 @@ const ConsoleWindow = ({
                 className: 'console-input',
                 type: 'text',
                 value: command,
-                onChange: (e) => setCommand(e.target.value),
-                placeholder: 'Run Python in script scope...',
+                onChange: (e) => {
+                    if (historyIndex !== -1) setHistoryIndex(-1);
+                    setCommand(e.target.value);
+                },
+                onKeyDown: handleInputKeyDown,
+                placeholder: interactiveEnabled
+                    ? 'Run Python in script scope...'
+                    : 'Interactive console disabled. Enable in panopti.connect(...)',
                 autoComplete: 'off',
                 spellCheck: false,
+                disabled: !interactiveEnabled,
             }),
             React.createElement(
                 'button',
-                { className: 'console-submit', type: 'submit', title: 'Run command' },
+                {
+                    className: 'console-submit',
+                    type: 'submit',
+                    title: interactiveEnabled ? 'Run command' : 'Interactive console disabled',
+                    disabled: !interactiveEnabled
+                },
                 'Run'
             )
         )

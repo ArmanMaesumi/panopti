@@ -969,6 +969,11 @@ button:disabled {
     border-color: #74c0fc;
 }
 
+.console-input:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 .console-submit {
     all: unset;
     border: 1px solid #4a5367;
@@ -983,6 +988,11 @@ button:disabled {
 .console-submit:hover {
     border-color: #74c0fc;
     color: #ffffff;
+}
+
+.console-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 /* Console line colors */

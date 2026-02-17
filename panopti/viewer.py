@@ -6,6 +6,7 @@ import inspect
 import numpy as np
 import time
 import uuid
+import re
 from typing import Dict, Any, Callable, Optional, Tuple, List, Union
 import os
 import sys
@@ -406,7 +407,8 @@ class BaseViewer:
 
 class ViewerClient(BaseViewer):
     """Client that connects to an existing panopti server"""
-    def __init__(self, server_url: str = None, viewer_id: str = None, *, headless: bool = False, viewport: Optional[Tuple[int, int]] = None):
+    def __init__(self, server_url: str = None, viewer_id: str = None, *, headless: bool = False,
+                 viewport: Optional[Tuple[int, int]] = None, interactive_console: bool = False):
         """Initialize a viewer client that connects to an existing panopti server.
 
         Args:
@@ -416,6 +418,7 @@ class ViewerClient(BaseViewer):
                 a random id will be generated.
             headless (bool, optional): Whether to run in headless mode. Defaults to False.
             viewport (Tuple[int, int], optional): Width and height of the headless viewport. Defaults to (1280, 720) if headless=True.
+            interactive_console (bool, optional): Whether to allow Python execution from the frontend console.
         """
         super().__init__()
         
@@ -423,6 +426,8 @@ class ViewerClient(BaseViewer):
             viewer_id = f"viewer_{uuid.uuid4().hex[:8]}"
         
         self.viewer_id = viewer_id
+        self.interactive_console_enabled = bool(interactive_console)
+        self._console_disabled_warning_emitted = False
         
         # Default to localhost:8080 if no server URL provided
         if not server_url:
@@ -457,6 +462,7 @@ class ViewerClient(BaseViewer):
         self.client.on('update_object', self.handle_update_object)
         self.client.on('restart_script', self.handle_restart_script)
         self.client.on('console_command', self.handle_console_command)
+        self.client.on('console_complete', self.handle_console_complete)
 
         # State requests:
         self.client.on('request_state_from_client', self.handle_request_state)
@@ -528,6 +534,7 @@ class ViewerClient(BaseViewer):
     def _emit_console_text(self, text: str, color: Optional[str] = None) -> None:
         if not text:
             return
+        self._print_buffer.write(text)
         from .utils.print_capture import split_text_to_segments
         segments = split_text_to_segments(text)
         if color is not None:
@@ -535,6 +542,16 @@ class ViewerClient(BaseViewer):
                 if not segment.get('color'):
                     segment['color'] = color
         self.socket_manager.emit_console_output(segments)
+
+    def _warn_console_disabled_once(self) -> None:
+        if self._console_disabled_warning_emitted:
+            return
+        self._console_disabled_warning_emitted = True
+        self._emit_console_text(
+            "[Panopti] Interactive console is disabled for this viewer. "
+            "Reconnect with panopti.connect(..., interactive_console=True) to enable Python execution.\n",
+            color='yellow'
+        )
 
     def _execute_console_command(self, command: str) -> None:
         command = str(command or '').rstrip('\n')
@@ -571,12 +588,84 @@ class ViewerClient(BaseViewer):
                     if stderr_text:
                         self._emit_console_text(stderr_text, color='red')
 
+    def _collect_console_completions(self, command: str) -> List[str]:
+        source = str(command or '').rstrip()
+        if not source:
+            return []
+
+        globals_dict, locals_dict = self._resolve_console_scope()
+
+        object_expr = None
+        prefix = ''
+        if '.' in source:
+            object_expr, prefix = source.rsplit('.', 1)
+            object_expr = object_expr.strip()
+
+        if object_expr:
+            target = eval(object_expr, globals_dict, locals_dict)
+            candidates = dir(target)
+            if prefix:
+                candidates = [name for name in candidates if name.startswith(prefix)]
+            else:
+                candidates = [name for name in candidates if not name.startswith('__')]
+            return sorted(set(candidates))
+
+        match = re.search(r'([A-Za-z_][A-Za-z0-9_]*)$', source)
+        if not match:
+            return []
+        prefix = match.group(1)
+        builtins_obj = globals_dict.get('__builtins__', __builtins__)
+        if isinstance(builtins_obj, dict):
+            builtins_names = set(builtins_obj.keys())
+        else:
+            builtins_names = set(dir(builtins_obj))
+        scope_names = set(globals_dict.keys()) | set(locals_dict.keys()) | builtins_names
+        return sorted(name for name in scope_names if name.startswith(prefix))
+
+    def _emit_completion_list(self, completions: List[str]) -> None:
+        if not completions:
+            self._emit_console_text("(no completions)\n", color='yellow')
+            return
+        chunk_size = 6
+        tabs = '\t' * 3
+        lines = []
+        # for i in range(len(completions)):
+        #     if i % chunk_size != 0:
+        #         lines.append(tabs + completions[i])
+        #     else:
+        #         lines.append(completions[i])
+        #     if i % chunk_size == chunk_size - 1:
+        #         lines.append("\n")
+        # self._emit_console_text("".join(lines) + "\n")
+        # For now just do a comma separated list:
+        self._emit_console_text(", ".join(completions) + "\n")
+
     def handle_console_command(self, data):
         if not isinstance(data, dict):
             return
         if data.get('viewer_id') != self.viewer_id:
             return
+        if not self.interactive_console_enabled:
+            self._warn_console_disabled_once()
+            return
         self._execute_console_command(data.get('command', ''))
+
+    def handle_console_complete(self, data):
+        if not isinstance(data, dict):
+            return
+        if data.get('viewer_id') != self.viewer_id:
+            return
+        if not self.interactive_console_enabled:
+            self._warn_console_disabled_once()
+            return
+
+        command = data.get('command', '')
+        with self._console_exec_lock:
+            try:
+                completions = self._collect_console_completions(command)
+                self._emit_completion_list(completions)
+            except BaseException:
+                self._emit_console_text(traceback.format_exc(), color='red')
 
     def hold(self):
         frame = inspect.currentframe()
@@ -592,6 +681,8 @@ class ViewerClient(BaseViewer):
     # --- Requesting state: ---
     def handle_request_state(self, data=None):
         """Send all current objects, UI controls, and print history to the client"""
+        self.socket_manager.emit('console_meta', {'enabled': self.interactive_console_enabled})
+
         # Reset the camera to default parameters for a fresh session
         self.socket_manager.emit_with_fallback(
             'set_camera',
@@ -793,7 +884,8 @@ class ViewerServer:
         from .server.app import run_standalone_server
         run_standalone_server(host=host, port=port, debug=debug, config_path=config_path)
 
-def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = False, viewport: Optional[Tuple[int, int]] = None) -> ViewerClient:
+def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = False,
+            viewport: Optional[Tuple[int, int]] = None, interactive_console: bool = False) -> ViewerClient:
     """Connect to an existing panopti server.
 
     Args:
@@ -801,8 +893,15 @@ def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = F
         viewer_id (str, optional): Unique identifier for this viewer. If not provided, a random id will be generated.
         headless (bool, optional): Whether to run in headless mode. Defaults to False.
         viewport (Tuple[int, int], optional): Width and height of the headless viewport. Defaults to (1280, 720) if headless=True.
+        interactive_console (bool, optional): Opt-in flag for frontend-triggered Python execution.
     """
-    viewer = ViewerClient(server_url, viewer_id, headless=headless, viewport=viewport)
+    viewer = ViewerClient(
+        server_url,
+        viewer_id,
+        headless=headless,
+        viewport=viewport,
+        interactive_console=interactive_console
+    )
 
     # Default console evaluation scope to the caller's namespace.
     frame = inspect.currentframe()
@@ -813,6 +912,14 @@ def connect(server_url: str = None, viewer_id: str = None, *, headless: bool = F
     finally:
         del frame
         del caller
+
+    if interactive_console:
+        msg = (
+            "[Panopti] Interactive console ENABLED. Commands typed in the frontend "
+            "can execute arbitrary Python code in this process."
+        )
+        print(msg)
+        viewer._emit_console_text(msg + "\n", color='yellow')
 
     return viewer
 
