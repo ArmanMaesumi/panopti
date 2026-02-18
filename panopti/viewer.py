@@ -396,6 +396,31 @@ class BaseViewer:
         self.socket_manager.emit_add_control(plot)
         return plot
     
+    def add_histogram(self, data: np.ndarray, name: str, bins: int = 10, colormap: str = 'viridis', compact: bool = True) -> PlotlyPlot:
+        from plotly.utils import PlotlyJSONEncoder
+        import plotly.graph_objects as go
+        import json
+        from .ui.plot_helpers import create_histogram
+
+        fig = create_histogram(data, bins, colormap, compact)
+        return self.add_plotly(fig.to_plotly_json(), name=name)
+
+    def add_bar_chart(self, x: np.ndarray, y: np.ndarray, name: str, colormap: str = 'viridis', compact: bool = True) -> PlotlyPlot:
+        from plotly.utils import PlotlyJSONEncoder
+        import plotly.graph_objects as go
+        import json
+        from .ui.plot_helpers import create_bar_chart
+
+        fig = create_bar_chart(x, y, colormap, compact)
+        return self.add_plotly(fig.to_plotly_json(), name=name)
+
+    def add_scatter_plot(self, x: np.ndarray, y: np.ndarray, name: str, colormap: str = 'viridis', compact: bool = True) -> PlotlyPlot:
+        import plotly.graph_objects as go
+        from .ui.plot_helpers import create_scatter_plot
+
+        fig = create_scatter_plot(x, y, colormap, compact)
+        return self.add_plotly(fig.to_plotly_json(), name=name)
+
     def get(self, name: str) -> Any:
         return self.objects.get(name) or self.ui_controls.get(name)
     

@@ -431,7 +431,7 @@ export function renderRenderToolbar(
             'button',
             {
                 className: `toolbar-button tooltip ${slicingPlaneEnabled ? 'active' : ''}`,
-                'data-tooltip': slicingPlaneEnabled ? 'Disable Slicing Plane' : 'Enable Slicing Plane',
+                'data-tooltip': slicingPlaneEnabled ? 'Disable Slicing Plane' : 'Slice Selected Object',
                 onClick: toggleSlicingPlane
             },
             React.createElement('i', { className: 'fas fa-cut' })

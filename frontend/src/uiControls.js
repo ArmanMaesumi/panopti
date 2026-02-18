@@ -295,9 +295,10 @@ export function renderControl(control, handlers) {
             return React.createElement(
                 'div',
                 { className: 'control-group', key: control.id },
+                React.createElement('label', { className: 'control-label' }, control.name),
                 React.createElement('div', {
                     id: `plotly-${control.id}`,
-                    style: { width: '100%', height: '300px' }
+                    style: { width: '100%', 'max-height': '300px' }
                 })
             );
         default:
