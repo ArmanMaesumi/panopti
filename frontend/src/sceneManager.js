@@ -8,6 +8,7 @@ import * as CONSTANTS from './constants.js';
 import { createMaterial, updateMaterial } from './materials.js';
 import { Gizmo } from './gizmo.js';
 import { createSelectionHelpers, SELECTION_MODE_DEFAULTS } from './selectionTools.js';
+import { SlicingPlaneController } from './slicingPlane.js';
 
 function bufferToTypedArray(buf, dtype) {
     // msgpack returns a Uint8Array for binary payloads. When constructing
@@ -275,6 +276,11 @@ export function createSceneManager(container, socket, callbacks = {}, background
     
     // Set up gizmo update callback to propagate changes to backend
     gizmo.setUpdateCallback((transforms) => {
+        if (slicingPlane.isEnabled() && slicingPlane.isHandle(gizmo.getAttachedObject())) {
+            syncSlicingPlaneFromHandle();
+            return;
+        }
+
         if (selectedObject && selectedObject.data) {
             const objectId = selectedObject.data.id;
             // Update the object locally
@@ -286,6 +292,11 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 if (window.viewerId) payload.viewer_id = window.viewerId;
                 socket.emit('update_object', payload);
             }
+        }
+    });
+    gizmo.setChangeCallback(() => {
+        if (slicingPlane.isEnabled() && slicingPlane.isHandle(gizmo.getAttachedObject())) {
+            syncSlicingPlaneFromHandle();
         }
     });
 
@@ -301,6 +312,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
     const objects = {};
     
     let selectedObject = null;
+    const slicingPlane = new SlicingPlaneController(scene, renderer);
     let selectionTool = { ...SELECTION_MODE_DEFAULTS };
     const selectionByObject = {};
     let lastSelectionInfo = null;
@@ -323,6 +335,64 @@ export function createSceneManager(container, socket, callbacks = {}, background
         x: 0,
         y: 0
     };
+
+    function applySlicingPlaneToObject(objData) {
+        slicingPlane.applyToObject(objData, selectedObject?.data?.id || null);
+    }
+
+    function applySlicingPlaneToAllObjects() {
+        slicingPlane.applyToObjects(objects, selectedObject?.data?.id || null);
+    }
+
+    function getSelectedSceneObjectData() {
+        if (!selectedObject || !selectedObject.data || !selectedObject.data.id) return null;
+        return objects[selectedObject.data.id] || null;
+    }
+
+    function syncSlicingPlaneFromHandle() {
+        slicingPlane.syncPlaneFromHandle();
+    }
+
+    function centerSlicingPlaneOnSelectedObject(resetOrientation = false) {
+        const target = getSelectedSceneObjectData();
+        if (!target || !target.object) return false;
+        return slicingPlane.centerOnObject(target.object, resetOrientation);
+    }
+
+    function syncGizmoAttachment() {
+        if (!gizmo || !gizmo.isEnabled()) {
+            gizmo.detach();
+            return;
+        }
+
+        if (slicingPlane.isEnabled()) {
+            gizmo.attach(slicingPlane.getHandle());
+            gizmo.setSelectedObject(null);
+            return;
+        }
+
+        const target = getSelectedSceneObjectData();
+        if (target) {
+            gizmo.attach(target.object);
+            gizmo.setSelectedObject({ type: target.type, data: target.data });
+        } else {
+            gizmo.detach();
+        }
+    }
+
+    function setSlicingPlaneEnabled(enabled) {
+        const nextEnabled = !!enabled;
+        if (!slicingPlane.setEnabled(nextEnabled)) return;
+
+        if (nextEnabled) {
+            if (!centerSlicingPlaneOnSelectedObject(true)) {
+                slicingPlane.resetToDefault();
+            }
+        }
+
+        applySlicingPlaneToAllObjects();
+        syncGizmoAttachment();
+    }
 
     const selectionHelpers = createSelectionHelpers({
         container,
@@ -1398,13 +1468,14 @@ export function createSceneManager(container, socket, callbacks = {}, background
             } else {
                 // Regular selection mode
                 if (objectData) {
+                    const previousSelectedId = selectedObject?.data?.id || null;
                     selectedObject = { ...objectData };
-                    
-                    // Attach gizmo to selected object if enabled
-                    if (gizmo.isEnabled()) {
-                        gizmo.attach(objectData.object);
-                        gizmo.setSelectedObject({ type: objectData.type, data: objectData.data });
+
+                    if (slicingPlane.isEnabled() && previousSelectedId !== objectData.data.id) {
+                        centerSlicingPlaneOnSelectedObject(false);
                     }
+                    applySlicingPlaneToAllObjects();
+                    syncGizmoAttachment();
                     
                     // Notify React component about selection
                     if (typeof onSelectObject === 'function') {
@@ -1467,6 +1538,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         const isSelected = _selectedObject && _selectedObject.data.id === data.id;
         if (isSelected && typeof onSelectObject === 'function') {
             selectedObject = { type: objects[data.id].type, data: objects[data.id].data };
+            applySlicingPlaneToAllObjects();
+            syncGizmoAttachment();
             onSelectObject(selectedObject);
         }
 
@@ -1853,6 +1926,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
             type: 'points',
             data: data
         };
+        applySlicingPlaneToObject(objects[data.id]);
     }
     
     const ARROW_BODY = new THREE.CylinderGeometry( 1, 1, 1, 12 ).rotateX( Math.PI/2).translate( 0, 0, 0.5 );
@@ -2267,10 +2341,15 @@ export function createSceneManager(container, socket, callbacks = {}, background
                 data[key] = value;
             }
         }
+
+        applySlicingPlaneToObject(objData);
     }
 
     function updateSelectionIfNeeded(objData, id) {
         if (selectedObject && selectedObject.data.id === id) {
+            if (slicingPlane.isEnabled()) {
+                syncGizmoAttachment();
+            }
             if (typeof onSelectObject === 'function') {
                 onSelectObject({ type: objData.type, data: objData.data });
             }
@@ -2320,10 +2399,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         
         if (selectedObject && selectedObject.data.id === id) {
             selectedObject = null;
-            // Detach gizmo when selected object is deleted
-            if (gizmo) {
-                gizmo.detach();
-            }
+            applySlicingPlaneToAllObjects();
+            syncGizmoAttachment();
             if (typeof onSelectObject === 'function') {
                 onSelectObject(null);
             }
@@ -2532,6 +2609,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         if (container.contains(selectionCanvas)) {
             container.removeChild(selectionCanvas);
         }
+
+        slicingPlane.dispose();
         
         // Dispose gizmo
         if (gizmo) {
@@ -2615,6 +2694,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
                         delete normalHelpers[id];
                     }
                 }
+
+                applySlicingPlaneToObject(objData);
             }
         }
         
@@ -2642,10 +2723,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
     function selectObject(id) {
         if (id === null) {
             selectedObject = null;
-            // Detach gizmo when deselecting
-            if (gizmo) {
-                gizmo.detach();
-            }
+            applySlicingPlaneToAllObjects();
+            syncGizmoAttachment();
             if (typeof onSelectObject === 'function') {
                 onSelectObject(null);
             }
@@ -2654,12 +2733,13 @@ export function createSceneManager(container, socket, callbacks = {}, background
         }
         const objData = objects[id];
         if (objData) {
+            const previousSelectedId = selectedObject?.data?.id || null;
             selectedObject = { ...objData };
-            // Attach gizmo to selected object if enabled
-            if (gizmo && gizmo.isEnabled()) {
-                gizmo.attach(objData.object);
-                gizmo.setSelectedObject({ type: objData.type, data: objData.data });
+            if (slicingPlane.isEnabled() && previousSelectedId !== id) {
+                centerSlicingPlaneOnSelectedObject(false);
             }
+            applySlicingPlaneToAllObjects();
+            syncGizmoAttachment();
             if (typeof onSelectObject === 'function') {
                 onSelectObject(selectedObject);
             }
@@ -2770,6 +2850,8 @@ export function createSceneManager(container, socket, callbacks = {}, background
         getScreenshot,
         getSelectionInfo,
         setSelectionTool,
+        setSlicingPlaneEnabled,
+        getSlicingPlaneEnabled: () => slicingPlane.isEnabled(),
         setCamera,
         lookAt,
         renderer,
@@ -2780,11 +2862,7 @@ export function createSceneManager(container, socket, callbacks = {}, background
         gizmo,
         setGizmoEnabled: (enabled) => {
             gizmo.setEnabled(enabled);
-            // If enabling and there's a selected object, attach to it
-            if (enabled && selectedObject) {
-                gizmo.attach(selectedObject.object || objects[selectedObject.data.id].object);
-                gizmo.setSelectedObject(selectedObject);
-            }
+            syncGizmoAttachment();
         },
         getGizmoEnabled: () => gizmo.isEnabled(),
         setGizmoMode: (mode) => gizmo.setMode(mode),

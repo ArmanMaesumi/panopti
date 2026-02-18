@@ -321,6 +321,8 @@ export function renderRenderToolbar(
     renderToClipboard,
     gizmoEnabled = false,
     toggleGizmo = null,
+    slicingPlaneEnabled = false,
+    toggleSlicingPlane = null,
     selectionTool = null,
     onToggleSelectionTool = null,
     onSetSelectionMode = null,
@@ -424,6 +426,15 @@ export function renderRenderToolbar(
                 onClick: toggleGizmo
             },
             React.createElement('i', { className: 'fas fa-arrows-alt' })
+        ),
+        toggleSlicingPlane && React.createElement(
+            'button',
+            {
+                className: `toolbar-button tooltip ${slicingPlaneEnabled ? 'active' : ''}`,
+                'data-tooltip': slicingPlaneEnabled ? 'Disable Slicing Plane' : 'Enable Slicing Plane',
+                onClick: toggleSlicingPlane
+            },
+            React.createElement('i', { className: 'fas fa-cut' })
         ),
         React.createElement('div', { className: 'toolbar-separator' }),
         React.createElement(

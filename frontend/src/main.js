@@ -111,6 +111,7 @@ const App = () => {
         bucketSelectComponent: true
     });
     const [gizmoEnabled, setGizmoEnabled] = React.useState(false);
+    const [slicingPlaneEnabled, setSlicingPlaneEnabled] = React.useState(false);
     const [lightSettings, setLightSettings] = React.useState({
         ambientColor: '#ffffff',
         ambientIntensity: 0.5,
@@ -664,6 +665,16 @@ const App = () => {
             sceneManagerRef.current.setGizmoEnabled(newEnabled);
         }
     };
+
+    const toggleSlicingPlane = () => {
+        const newEnabled = !slicingPlaneEnabled;
+        setSlicingPlaneEnabled(newEnabled);
+        setGizmoEnabled(newEnabled);
+        if (sceneManagerRef.current) {
+            sceneManagerRef.current.setSlicingPlaneEnabled(newEnabled);
+            sceneManagerRef.current.setGizmoEnabled(newEnabled);
+        }
+    };
     
     const exportObject = exportObj;
 
@@ -719,6 +730,8 @@ const App = () => {
             renderToClipboard,
             gizmoEnabled,
             toggleGizmo,
+            slicingPlaneEnabled,
+            toggleSlicingPlane,
             selectionTool,
             toggleSelectionTool,
             setSelectionMode,
