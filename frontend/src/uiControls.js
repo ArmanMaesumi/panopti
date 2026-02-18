@@ -230,7 +230,7 @@ export function renderControl(control, handlers) {
         case 'button':
             return React.createElement(
                 'div',
-                { className: 'control-group', key: control.id },
+                { className: 'control-group control-group-button', key: control.id },
                 React.createElement(
                     'button',
                     { onClick: () => h.handleButtonClick(control.id) },
@@ -240,7 +240,7 @@ export function renderControl(control, handlers) {
         case 'download_button':
             return React.createElement(
                 'div',
-                { className: 'control-group', key: control.id },
+                { className: 'control-group control-group-button', key: control.id },
                 React.createElement(
                     'button',
                     { onClick: () => h.handleButtonClick(control.id) },

@@ -255,6 +255,15 @@ body::before {
 
 .ui-panel-content .control-group > button {
     min-height: 34px;
+    /* background-color: var(--primary-color); */
+    border-style: inset;
+    border-width: 0.5px;
+    border-color: #9eb4c8;
+}
+
+.ui-panel-content .control-group-button {
+    padding: 0px;
+    border: none;
 }
 
 .control-description {
@@ -359,11 +368,13 @@ button {
 }
 
 button:hover {
+    transform: translateY(-1px);
     background: #152537;
     border-color: #456082;
 }
 
 button:active {
+    transform: translateY(0px);
     background: #0e1a28;
 }
 
