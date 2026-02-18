@@ -87,6 +87,7 @@ const App = () => {
     const [panelTransitionClass, setPanelTransitionClass] = React.useState('');
 
     const [isLoading, setIsLoading] = React.useState(true);
+    const [isViewerIdMissing, setIsViewerIdMissing] = React.useState(false);
 
     // ThreeJS Viewer:
     const [backgroundColor, setBackgroundColor] = React.useState(() =>
@@ -195,6 +196,16 @@ const App = () => {
         setSelectedObject(null);
         setViewerScriptName(null);
     };
+
+    // Check if viewerId is missing
+    React.useEffect(() => {
+        const viewerId = window.viewerId;
+        console.log('VIEWER ID: ', viewerId);
+        if (!viewerId || viewerId === '' || viewerId === 'undefined' || viewerId === 'null') {
+            console.log('VIEWER ID IS MISSING');
+            setIsViewerIdMissing(true);
+        }
+    }, []);
 
     // Load config from injected data or fallback defaults
     React.useEffect(() => {
@@ -862,11 +873,108 @@ const App = () => {
             React.createElement('div', { className: 'spinner' })
         );
     };
+
+    // ViewerId Missing Warning Overlay
+    const renderViewerIdWarning = () => {
+        if (!isViewerIdMissing) return null;
+        
+        return React.createElement(
+            'div',
+            { 
+                className: 'viewer-id-warning-overlay',
+                style: {
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10000,
+                    padding: '20px',
+                    fontFamily: 'var(--font-family, sans-serif)'
+                }
+            },
+            React.createElement(
+                'div',
+                {
+                    style: {
+                        backgroundColor: 'rgba(30, 35, 42, 0.95)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '8px',
+                        padding: '24px 28px',
+                        maxWidth: '480px',
+                        textAlign: 'center',
+                        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
+                    }
+                },
+                React.createElement(
+                    'div',
+                    {
+                        style: {
+                            fontSize: '28px',
+                            marginBottom: '12px',
+                            color: 'rgba(255, 255, 255, 0.5)'
+                        }
+                    },
+                    React.createElement('i', { className: 'fas fa-info-circle' })
+                ),
+                React.createElement(
+                    'h2',
+                    {
+                        style: {
+                            fontSize: '18px',
+                            fontWeight: '600',
+                            marginBottom: '10px',
+                            color: 'rgba(255, 255, 255, 0.9)'
+                        }
+                    },
+                    'Viewer ID missing'
+                ),
+                React.createElement(
+                    'p',
+                    {
+                        style: {
+                            fontSize: '14px',
+                            lineHeight: '1.5',
+                            marginBottom: '16px',
+                            color: 'rgba(255, 255, 255, 0.65)'
+                        }
+                    },
+                    'Connect using a URL that includes a viewerId parameter. After running `panopti.connect(...)` the appropriate URL will be printed. For example: http://localhost:8080/?viewer_id=my_id'
+                ),
+                React.createElement(
+                    'a',
+                    {
+                        href: 'https://armanmaesumi.github.io/panopti/getting_started/',
+                        target: '_blank',
+                        rel: 'noopener noreferrer',
+                        style: {
+                            fontSize: '14px',
+                            color: 'rgba(120, 180, 255, 0.95)',
+                            textDecoration: 'none'
+                        },
+                        onMouseEnter: (e) => { e.target.style.textDecoration = 'underline'; },
+                        onMouseLeave: (e) => { e.target.style.textDecoration = 'none'; }
+                    },
+                    'Getting Started',
+                    React.createElement('i', {
+                        className: 'fas fa-external-link-alt',
+                        style: { marginLeft: '6px', fontSize: '12px', opacity: 0.8 }
+                    })
+                )
+            )
+        );
+    };
     const hasPanelSubtitle = Boolean(viewerScriptName);
 
     return React.createElement(
         'div',
         { className: "viewer-container", style: { position: 'relative' } },
+        renderViewerIdWarning(),
         React.createElement(
             'div',
             {

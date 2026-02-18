@@ -24,7 +24,13 @@
 <body>
   <div id="app"></div>
   
-  <script>window.viewerId = "{{ viewer_id }}";</script>
+  <script>
+    {% if viewer_id is none %}
+      window.viewerId = undefined;
+    {% else %}
+      window.viewerId = "{{ viewer_id }}";
+    {% endif %}
+  </script>
   <script>window.panoptiConfig = {{ config | tojson | safe }};</script>
 
   {% if is_dev %}
