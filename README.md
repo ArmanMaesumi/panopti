@@ -16,7 +16,7 @@ Panopti offers several features:
 - ✅ Interactive UI elements with Python callbacks
 - ✅ Programmable events: on-click, inspection tool, transformation gizmo, camera update, etc.
 - ✅ Convenience features: exporting geometry, embedding Plotly figures
-- ✅ Interactive web console that can access your Python script state
+- ✅ Interactive web console that lets you debug with your Python script's state
 - ✅ Material customization
 
 See the [docs](https://armanmaesumi.github.io/panopti/) for more!
