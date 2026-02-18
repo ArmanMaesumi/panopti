@@ -751,7 +751,9 @@ const App = () => {
             sceneManagerRef,
             updateSceneObjectsList,
             isLayersPanelCollapsed,
-            () => setIsLayersPanelCollapsed((prev) => !prev)
+            () => setIsLayersPanelCollapsed((prev) => !prev),
+            selectionTool?.enabled === true,
+            slicingPlaneEnabled
         );
 
     const renderTransformPanel = () => {

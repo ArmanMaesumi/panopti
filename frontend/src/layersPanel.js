@@ -121,7 +121,11 @@ export function getVisibilityIconClass(obj) {
     }
 }
 
-export function renderLayersPanel(sceneObjects, selectedObject, setSelectedObject, sceneManagerRef, updateSceneObjectsList, isCollapsed, onToggleCollapse) {
+export function renderLayersPanel(sceneObjects, selectedObject, setSelectedObject, sceneManagerRef, updateSceneObjectsList, isCollapsed, onToggleCollapse, selectionToolEnabled = false, slicingPlaneEnabled = false) {
+    const needsObject = !selectedObject && !isCollapsed;
+    const showSelectObjectHint = selectionToolEnabled && needsObject;
+    const showSlicingPlaneHint = slicingPlaneEnabled && needsObject && !showSelectObjectHint;
+
     return React.createElement(
         'div',
         { className: `layers-panel${isCollapsed ? ' collapsed' : ''}` },
@@ -142,7 +146,19 @@ export function renderLayersPanel(sceneObjects, selectedObject, setSelectedObjec
         ),
         React.createElement(
             'div',
-            { className: 'layers-panel-content' },
+            { className: 'layers-panel-content', style: { position: 'relative' } },
+            showSelectObjectHint && React.createElement(
+                'div',
+                { className: 'layers-panel-select-hint' },
+                React.createElement('i', { className: 'fa-regular fa-hand-pointer' }),
+                React.createElement('span', { className: 'layers-panel-select-hint-text' }, 'Select an object to use selection tools')
+            ),
+            showSlicingPlaneHint && React.createElement(
+                'div',
+                { className: 'layers-panel-select-hint' },
+                React.createElement('i', { className: 'fas fa-cut' }),
+                React.createElement('span', { className: 'layers-panel-select-hint-text' }, 'Select an object to slice')
+            ),
             sceneObjects.length > 0
                 ? sceneObjects.map(obj =>
                     React.createElement(
