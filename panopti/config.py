@@ -1,7 +1,13 @@
 # panopti/config.py
 import os
 from typing import Dict, Any, Optional
-import pkg_resources
+try:
+    from importlib.resources import files as importlib_files
+except ImportError:
+    try:
+        from importlib_resources import files as importlib_files
+    except ImportError:
+        print("Error: importlib.resources (Python 3.9+) or importlib_resources (Python 3.8) is not installed")
 import tomli
 
 def merge_configs(user_config: Dict[str, Any], default_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -55,7 +61,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 def get_default_config() -> Dict[str, Any]:
     """Return the default configuration by loading from default_config.toml."""
-    default_config_path = pkg_resources.resource_filename('panopti', 'default_config.toml')
+    default_config_path = importlib_files('panopti') / 'default_config.toml'
     if os.path.exists(default_config_path):
         with open(default_config_path, 'rb') as f:
             return tomli.load(f)

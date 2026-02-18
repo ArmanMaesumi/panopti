@@ -4,7 +4,13 @@ import uuid
 from flask import Flask, render_template, send_from_directory, request, Response, jsonify
 from panopti.utils.parse import decode_msgpack, encode_msgpack, as_list
 from flask_socketio import SocketIO, join_room
-import pkg_resources
+try:
+    from importlib.resources import files as importlib_files
+except ImportError:
+    try:
+        from importlib_resources import files as importlib_files
+    except ImportError:
+        print("Error: importlib.resources (Python 3.9+) or importlib_resources (Python 3.8) is not installed")
 import json
 
 import panopti.objects as PanoptiObjects
@@ -12,16 +18,12 @@ from panopti.objects.utils import export_object_from_dict
 from .handlers import register_handlers, _update_viewer_state
 from panopti.config import load_config
 
-template_path = pkg_resources.resource_filename(
-    "panopti", "server/static/templates"
-)
-manifest_path = pkg_resources.resource_filename(
-    "panopti", "server/static/dist/.vite/manifest.json"
-)
+manifest_path = importlib_files('panopti') / 'server/static/dist/.vite/manifest.json'
 with open(manifest_path, "r", encoding="utf-8") as f:
     manifest = json.load(f)
 
 def create_app(config_path: str = None, debug: bool = False):
+    template_path = importlib_files('panopti') / 'server/static/templates'
     app = Flask(__name__, template_folder=template_path)
     app.config['SECRET_KEY'] = 'secret!'
     app.config['DEBUG'] = debug
